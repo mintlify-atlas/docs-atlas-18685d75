@@ -1,0 +1,400 @@
+---
+title: "Production Troubleshooting"
+description: "Diagnosing and resolving production incidents on the Programs & Events Dashboard, including web server issues, database problems, Sidekiq queue management, and Wikipedia API blocks."
+---
+
+This guide covers operational procedures for resolving incidents in the production environment. For local development issues, see the [Troubleshooting](/operations/troubleshooting) guide.
+
+---
+
+## Web Server Issues
+
+<AccordionGroup>
+  <Accordion title="Internal Server Error (500)">
+    A 500 error from the web server is often caused by a failed Rails process.
+
+    **Resolution:** Restart the web server via Capistrano or by SSHing into `peony-web` and restarting Passenger/Apache:
+
+    ```bash
+    ssh peony-web.globaleducation.eqiad1.wikimedia.cloud
+    sudo systemctl restart apache2
+    ```
+
+    Check the application logs for the root cause before restarting if the service is still responsive enough to generate logs.
+  </Accordion>
+  <Accordion title="Unresponsive web service">
+    Usually caused by a surge in high-activity events or a traffic spike that exhausts available Passenger workers, leading to system overload.
+
+    **Resolution:** Reboot the VM running the web server. From the [Horizon Cloud VPS panel](https://horizon.wikimedia.org), find the `peony-web` instance and perform a soft reboot. The web service typically recovers within a few minutes to a few hours.
+
+    <Note>
+      Before rebooting, check Grafana for CPU and memory trends to confirm this is the cause. Log the reboot in the [Server Admin Logs](https://sal.toolforge.org/globaleducation).
+    </Note>
+  </Accordion>
+  <Accordion title="Putting up a maintenance page">
+    If you need to take the Dashboard offline while the server is still running, redirect all traffic to a static maintenance page.
+
+    <Steps>
+      <Step title="Create a maintenance index.html">
+        Place a static HTML file at the web root, for example `/var/www/html/index.html`:
+
+        ```html
+        <html>
+          <p>Programs &amp; Events Dashboard has been having unexpected problems since 2024-01-01.</p>
+          <p>I'm taking it offline to repair it. It will be back as soon as possible, likely later today.</p>
+          <p>For details and updates, see <a href="https://phabricator.wikimedia.org/T277651">https://phabricator.wikimedia.org/T277651</a>.</p>
+          <p>&nbsp;</p>
+          <p>-Your Name, Wiki Education</p>
+        </html>
+        ```
+      </Step>
+      <Step title="Create an .htaccess redirect">
+        Add a `.htaccess` file in the web root:
+
+        ```
+        RewriteEngine On
+        RewriteBase /
+        RewriteCond %{REQUEST_FILENAME} !-f
+        RewriteCond %{REQUEST_FILENAME} !-d
+        RewriteRule . /index.html [L]
+        ```
+      </Step>
+      <Step title="Enable mod_rewrite">
+        Enable the Apache rewrite module and allow `.htaccess` overrides:
+
+        ```bash
+        sudo a2enmod rewrite
+        ```
+
+        Add to the Apache site configuration:
+
+        ```
+        <Directory "/var/www/html">
+          AllowOverride All
+        </Directory>
+        ```
+      </Step>
+      <Step title="Reload Apache">
+        ```bash
+        sudo systemctl reload apache2
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Database Issues
+
+<AccordionGroup>
+  <Accordion title="Full disk on database server">
+    When the database volume is full, MariaDB will stop accepting writes and the application will begin throwing errors.
+
+    **Immediate relief:** Delete temporary tables to free space.
+
+    **Permanent fix:** Request a storage allocation increase via Phabricator (example: [T324694](https://phabricator.wikimedia.org/T324694)), then extend the Cinder volume.
+
+    <Warning>
+      Extending the volume requires draining Sidekiq queues and putting up a maintenance message before starting. Do not skip this step — writes during the resize can corrupt data.
+    </Warning>
+
+    <Steps>
+      <Step title="Drain Sidekiq queues">
+        Pause all queues from the Sidekiq Web UI at `/sidekiq`, or stop the Sidekiq services on each server.
+      </Step>
+      <Step title="Put up a maintenance message">
+        Use the site notice on the `/settings` page, or deploy a static maintenance page as described in the Web Server section.
+      </Step>
+      <Step title="Locate and detach the Cinder volume">
+        Find the `peony-database` instance on [horizon.wikimedia.org](https://horizon.wikimedia.org) and detach the Cinder volume.
+      </Step>
+      <Step title="Resize the volume">
+        Follow the [Cloud VPS Cinder resize guide](https://wikitech.wikimedia.org/wiki/Help:Adding_Disk_Space_to_Cloud_VPS_instances#Cinder).
+      </Step>
+      <Step title="Reattach and verify">
+        Reattach the volume. It should appear as `/dev/sdb`. If it is mounted elsewhere, restart the instance to ensure correct mounting.
+      </Step>
+      <Step title="Restore service">
+        Restart all Sidekiq services and remove the maintenance message.
+      </Step>
+    </Steps>
+  </Accordion>
+  <Accordion title="Stuck transactions causing unresponsiveness">
+    A stuck or long-running transaction can cause the Rails server to become unresponsive as connections queue up waiting for a lock.
+
+    **Resolution:** Restart MariaDB on the database server:
+
+    ```bash
+    ssh peony-database.globaleducation.eqiad1.wikimedia.cloud
+    sudo systemctl restart mariadb
+    ```
+
+    Before restarting, identify stuck transactions using:
+
+    ```sql
+    SELECT * FROM information_schema.innodb_trx;
+    ```
+
+    If a specific transaction is the culprit, kill it with `KILL <thread_id>` to avoid a full restart if possible.
+  </Accordion>
+  <Accordion title="High-edit or long-running courses causing errors">
+    Courses with very high edit counts can exhaust memory or timeout during updates, causing errors in the `long_update` or `very_long_update` queues.
+
+    **Resolution:** Pause the affected queues from the Sidekiq Web UI (`/sidekiq`) to stop processing those jobs while you investigate:
+
+    1. Go to `/sidekiq` → **Queues**
+    2. Pause `long_update` and/or `very_long_update`
+
+    Once the immediate problem is resolved, investigate whether specific courses should be excluded from updates or whether queue concurrency needs adjustment.
+  </Accordion>
+  <Accordion title="Database encoding errors (emoji / unicode)">
+    Production databases created before the utf8mb4 migration may have columns using `utf8mb3`, which cannot store 4-byte emoji characters.
+
+    For tables with no indexed columns affected, an `ALTER TABLE` command is sufficient:
+
+    ```sql
+    ALTER TABLE ticket_dispenser_messages
+      CONVERT TO CHARACTER SET utf8mb4
+      COLLATE utf8mb4_unicode_ci;
+    ```
+
+    <Note>
+      For indexed columns, encoding changes are more complex because index sizes may change. Plan these migrations carefully and test in a staging environment first.
+    </Note>
+  </Accordion>
+  <Accordion title="Enabling slow query logging">
+    To diagnose performance issues, enable MariaDB's slow query log:
+
+    ```bash
+    ssh peony-database.globaleducation.eqiad1.wikimedia.cloud
+    cat /etc/mysql/my.cnf
+    ```
+
+    Edit `/etc/mysql/my.cnf` and set:
+
+    ```
+    slow_query_log = ON
+    long_query_time = 60
+    ```
+
+    Then restart MariaDB:
+
+    ```bash
+    sudo systemctl restart mariadb
+    ```
+
+    Review the slow query log:
+
+    ```bash
+    sudo tail -300 /srv/mysql/peony-database-slow.log
+    ```
+
+    See the [official MariaDB slow query log documentation](https://mariadb.com/kb/en/slow-query-log-overview/) for more options.
+  </Accordion>
+  <Accordion title="App and database server version mismatch">
+    If the application begins throwing unexpected database errors after an upgrade, verify that the MariaDB client version on the app servers matches what the production database server expects.
+
+    Check the versions:
+
+    ```bash
+    mysql --version         # on the app server
+    mariadb --version       # on the database server
+    ```
+
+    Consult the MariaDB upgrade notes if a version mismatch is found.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Data Dumps and Recovery
+
+<AccordionGroup>
+  <Accordion title="Performing a table dump in recovery mode">
+    If a table is corrupted and needs to be dumped and restored, follow this procedure:
+
+    <Warning>
+      Placing the database in `innodb_force_recovery` mode makes it **read-only**. Commands like `OPTIMIZE TABLE` will not run in this state. Plan accordingly.
+    </Warning>
+
+    <Steps>
+      <Step title="Enable recovery mode">
+        Edit `/etc/mysql/my.cnf` and set:
+
+        ```
+        innodb_force_recovery = 1
+        ```
+
+        Restart MariaDB to apply.
+      </Step>
+      <Step title="Start the dump">
+        ```bash
+        mysqldump -u root -p dashboard table_name > /tmp/table_name_dump.sql
+        ```
+      </Step>
+      <Step title="Drop the corrupted table">
+        Once the dump is confirmed complete and valid:
+
+        ```sql
+        DROP TABLE table_name;
+        ```
+      </Step>
+      <Step title="Restore normal mode">
+        Remove or comment out `innodb_force_recovery` from `/etc/mysql/my.cnf` and restart MariaDB.
+      </Step>
+      <Step title="Restore the table">
+        ```bash
+        mysql -u root -p dashboard < /tmp/table_name_dump.sql
+        ```
+      </Step>
+    </Steps>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Wikipedia API Blocks and Rate Limits
+
+<AccordionGroup>
+  <Accordion title="Dashboard edits blocked by IP range block">
+    Wikimedia blocks edits from broad IP ranges for many cloud server providers. These may be global or local blocks.
+
+    **Diagnosis:** Check whether edits from the Dashboard's IP are being blocked by visiting the relevant wiki's block log.
+
+    **Resolution:**
+    - For a **local anon-only block**: Work with wiki admins to confirm the block applies only to anonymous users. Logged-in Dashboard bot edits will not be affected.
+    - For a **local block affecting logged-in users**: Ask wiki admins to modify the block to be anon-only.
+    - For a **global block**: One solution is to disable the global block on the local wiki and (if needed) create a local anon-only block for the same range.
+
+    Reference examples:
+    - [Changing a local rangeblock to anon-only](https://en.wikipedia.org/w/index.php?title=Special:Log/block&page=User%3A45.79.0.0%2F16)
+    - [Locally disabling a global block](https://en.wikipedia.org/w/index.php?title=Special:Log&logid=117955646)
+  </Accordion>
+  <Accordion title="Dashboard exceeding API rate limits">
+    The Dashboard can make enough automated edits to exceed default rate limits (e.g., for new account creation or edit submission).
+
+    **Resolution:** File a Phabricator request to add the Dashboard bot account to the appropriate user group (e.g., `bot` or a custom rate-limit exemption group) on the affected wiki.
+
+    Relevant prior tickets:
+    - [T126541](https://phabricator.wikimedia.org/T126541)
+    - [T151823](https://phabricator.wikimedia.org/T151823)
+    - [T283096](https://phabricator.wikimedia.org/T283096)
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Sidekiq Queue Management
+
+<AccordionGroup>
+  <Accordion title="Removing specific jobs from a queue">
+    To manually remove specific jobs from a Sidekiq queue without flushing the entire queue, use the Rails console on the web server:
+
+    ```bash
+    ssh peony-web.globaleducation.eqiad1.wikimedia.cloud
+    cd /current && bundle exec rails console -e production
+    ```
+
+    Example: delete all `AiDetectionWorker` jobs for a specific course:
+
+    ```ruby
+    Sidekiq::Queue.new('default').each do |j|
+      next unless j.klass == 'AiDetectionWorker'
+      next unless j.args.first["course_id"] == 19655
+      j.delete
+    end
+    ```
+
+    Adjust the class name and argument filters to match the jobs you want to remove.
+  </Accordion>
+  <Accordion title="Clearing stuck uniquejobs locks">
+    Sometimes a Redis lock from `uniquejobs` persists even though the associated job is no longer enqueued or running. This prevents new instances of the job from being enqueued.
+
+    <Warning>
+      Only delete all uniquejobs locks if you are certain no jobs are currently running and all queues are empty. This is safe to do during a maintenance window but could cause duplicate job execution if done while jobs are active.
+    </Warning>
+
+    Connect to Redis directly:
+
+    ```bash
+    ssh p-and-e-dashboard-redis.globaleducation.eqiad1.wikimedia.cloud
+    redis-cli
+    ```
+
+    List all uniquejobs keys:
+
+    ```
+    keys uniquejobs*
+    ```
+
+    Delete all uniquejobs keys:
+
+    ```bash
+    redis-cli --raw keys "uniquejobs*" | xargs redis-cli del
+    ```
+
+    <Note>
+      This will not affect scheduled jobs that haven't been enqueued yet. Those will enqueue normally on their next cron trigger.
+    </Note>
+  </Accordion>
+  <Accordion title="Pausing and resuming specific queues">
+    To pause a queue temporarily (e.g., during maintenance or to stop processing problematic jobs):
+
+    1. Go to `/sidekiq` in the admin interface.
+    2. Navigate to the **Queues** tab.
+    3. Click **Pause** next to the queue you want to stop.
+
+    Jobs remain in the queue and are not lost — they will be processed once you click **Resume**.
+
+    To restart a specific Sidekiq process entirely, SSH into the relevant server and restart its systemd service:
+
+    ```bash
+    # On peony-sidekiq, to restart the long_update process:
+    ssh peony-sidekiq.globaleducation.eqiad1.wikimedia.cloud
+    sudo systemctl restart sidekiq-long
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Deployment Issues (Capistrano)
+
+<AccordionGroup>
+  <Accordion title="rails console doesn't work from /current directory">
+    Running `rails c -e production` directly from the `/current` deployment directory may fail.
+
+    **Fix:** Install binstubs first:
+
+    ```bash
+    bundle install --binstubs
+    ```
+
+    Then use `bin/rails c -e production`.
+  </Accordion>
+  <Accordion title="Capistrano cannot restart Sidekiq — missing passwordless sudo">
+    If Capistrano fails because the deploying user lacks passwordless sudo, configure it:
+
+    <Warning>
+      Granting `NOPASSWD: ALL` is a broad privilege. Restrict this to the specific commands needed if possible.
+    </Warning>
+
+    Edit `/etc/sudoers` on the target server (use `visudo`):
+
+    ```
+    deploying_user ALL=(ALL) NOPASSWD: ALL
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## More Resources
+
+- [Infrastructure Overview](/operations/infrastructure-overview) — Servers and architecture
+- [Monitoring & Observability](/operations/monitoring) — Grafana, Prometheus, and Sentry
+- [Admin Guide](/operations/admin-guide) — Sidekiq Web UI and admin settings
+- [Cloud VPS Adding Disk Space](https://wikitech.wikimedia.org/wiki/Help:Adding_Disk_Space_to_Cloud_VPS_instances#Cinder)
+- [MariaDB Slow Query Log](https://mariadb.com/kb/en/slow-query-log-overview/)
+- [Phabricator P&E Dashboard Project](https://phabricator.wikimedia.org/project/manage/1052/)

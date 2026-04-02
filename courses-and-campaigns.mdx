@@ -1,0 +1,149 @@
+---
+title: "Courses & Campaigns"
+description: "How to create and manage courses (programs) and campaigns on the Wiki Education Dashboard."
+---
+
+A **course** (called a **program** in the Programs & Events deployment) represents a single Wikipedia education initiative — typically a university class, an editathon, or a structured editing fellowship. A **campaign** groups related courses together, aggregates their statistics, and controls approval settings.
+
+## Deployment modes
+
+The dashboard ships in two configurations controlled by `wiki_education` in `config/application.yml`.
+
+| Setting | Deployment | Terminology | Approval |
+|---|---|---|---|
+| `wiki_education: true` | dashboard.wikiedu.org | Course / Student / Instructor | Requires admin approval |
+| `wiki_education: false` | outreachdashboard.wmflabs.org | Program / Editor / Facilitator | Auto-approved on creation |
+
+<Note>
+Some features are only active in one mode. The interface copy (labels, emails, help text) also differs between the two deployments.
+</Note>
+
+## Course types
+
+The `type` column on the `courses` table determines behavior. Valid types are:
+
+| Type | Description |
+|---|---|
+| `ClassroomProgramCourse` | Default for Wiki Education; includes a structured timeline and progress tracker |
+| `BasicCourse` | Minimal course type used by Programs & Events |
+| `ArticleScopedProgram` | Tracks only a defined set of articles (not all student edits) |
+| `Editathon` | Short editing events; no passcode required |
+| `FellowsCohort` | For Wiki Education fellowship programs |
+| `VisitingScholarship` | For visiting scholar programs |
+| `SingleUser` | Tracks a single editor's activity |
+| `LegacyCourse` | Imported from the old EducationProgram MediaWiki extension |
+
+## Course lifecycle
+
+<Steps>
+  <Step title="Create the course">
+    Click **Create Course** from the home page. Fill in the title, institution, term, start and end dates, and a description. The wizard generates a unique `slug` (e.g. `University_Name/Course_Title_(Term)`) used in all URLs.
+
+    A `passcode` is generated automatically. Students use it to self-enroll via the enroll link.
+  </Step>
+  <Step title="Submit for review">
+    Once the course details are complete, click **Submit** from the course banner. This sets `submitted: true` on the course record. The course is now visible to admins in the submitted-but-unapproved queue.
+
+    <Note>
+    In the Programs & Events deployment, courses are approved automatically on creation and this step is skipped.
+    </Note>
+  </Step>
+  <Step title="Admin approves the course">
+    An admin opens the course, clicks **Edit Details**, then adds the course to a campaign by clicking the **+** next to *Campaigns* and selecting one. Adding a course to a campaign is what constitutes approval — `course.approved?` returns `true` when `campaigns.any? && !withdrawn`.
+
+    After approval, the enroll link (containing the passcode) appears in the course banner.
+  </Step>
+  <Step title="Enroll students">
+    Students can join in two ways:
+
+    - Visit the enroll URL directly (e.g. `/courses/School/Title_(Term)/enroll/PASSCODE`).
+    - An instructor or admin manually adds a username from the **Students → Enrollment** tab.
+
+    A student and their instructor cannot be the same account within a single course.
+  </Step>
+  <Step title="Run the course">
+    While the course is active, the dashboard polls Wikipedia every few minutes via Sidekiq workers. It imports revisions, calculates article quality scores, and updates aggregate statistics (bytes added, references added, article views, new article count, etc.) on the course record.
+  </Step>
+  <Step title="Course ends and is archived">
+    After the end date, the course enters an extended update window (`UPDATE_LENGTH`, configurable via `ENV['update_length']`). During this window the dashboard continues to refresh data. Once the window passes the course is considered archived and updates stop.
+  </Step>
+</Steps>
+
+## Key course attributes
+
+The `courses` table stores these important fields:
+
+| Field | Purpose |
+|---|---|
+| `slug` | URL-safe identifier used in all routes |
+| `passcode` | Required for student self-enrollment |
+| `submitted` | `true` after the instructor submits for approval |
+| `start` / `end` | Active date range for the course |
+| `timeline_start` / `timeline_end` | Date range for the course timeline (may differ from active dates) |
+| `type` | Determines course behavior (see course types above) |
+| `private` | Hides course from public listings |
+| `withdrawn` | Marks a course as inactive even if in a campaign |
+| `home_wiki_id` | The primary Wikipedia/Wikimedia wiki for this course |
+| `needs_update` | Triggers a full data refresh on next update cycle |
+| `flags` | Serialized hash for feature toggles (timeline, sandboxes, wiki edits, etc.) |
+
+## Campaigns
+
+A campaign is a named collection of courses. It aggregates statistics across all member courses and controls shared settings.
+
+### What campaigns do
+
+- **Approval gate**: adding a course to a campaign approves it (Wiki Education mode).
+- **Aggregate stats**: campaigns expose combined article counts, editor counts, bytes added, and more across all member courses.
+- **Survey assignment**: `SurveyAssignment` records attach surveys to all students or instructors in courses belonging to a specific campaign.
+- **Account creation**: when `register_accounts: true`, students in campaign courses can request Wikipedia accounts through the dashboard.
+- **Default course type**: a campaign can set `default_course_type` to `Editathon`, `BasicCourse`, or `ArticleScopedProgram`, which pre-selects that type when instructors create courses within the campaign.
+
+### Campaign attributes
+
+| Field | Purpose |
+|---|---|
+| `title` | Human-readable name |
+| `slug` | URL identifier (auto-derived from title) |
+| `start` / `end` | Optional date range for the campaign period |
+| `default_course_type` | Pre-selected type for new courses in this campaign |
+| `default_passcode` | Optional shared passcode for all courses in the campaign |
+| `register_accounts` | Enables Wikipedia account request flow |
+| `template_description` | Default description applied to new courses |
+
+### Organizers
+
+Users can be designated as campaign **organizers** via the `CampaignsUsers` join table. Organizers have edit rights over any course in the campaign, equivalent to being an instructor on each course.
+
+## Article-scoped programs
+
+When `type` is `ArticleScopedProgram`, the course only tracks edits to a predefined list of articles. The `only_scoped_articles_course?` method returns `true`, and the `scoped_article_timeslices` method filters data to assigned or category-defined articles only.
+
+Articles can be scoped via:
+- **Assignments**: directly assigned article titles per student.
+- **Categories**: `CategoriesCourses` links a course to a MediaWiki category; all articles in that category are tracked.
+
+## Populating a course with data
+
+To pull in real Wikipedia edit data for a course:
+
+```bash
+# Trigger a manual update via the URL
+GET /courses/School/Title_(Term)/manual_update
+
+# Or from the Rails console
+course = Course.find_by(slug: 'School/Title_(Term)')
+UpdateCourseStats.new(course)
+```
+
+To seed several sample courses in a development environment:
+
+```bash
+rake dev:populate
+```
+
+To copy a course from production:
+
+```bash
+rake dev:copy_course 'https://dashboard.wikiedu.org/courses/School/Course_(Term)'
+```

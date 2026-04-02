@@ -1,0 +1,435 @@
+---
+title: "Local Development Setup"
+description: "Set up the Wiki Education Dashboard for local development using the automated setup script or manual installation."
+---
+
+This page covers two approaches to getting a local development environment running. The [automated script](#script-setup) is the fastest path for most developers. If you prefer full control, or the script doesn't support your OS, follow the [manual setup](#manual-setup) steps instead.
+
+<Note>
+  If you'd rather use containers, see [Docker Development Setup](/docker) for a Docker-based alternative.
+</Note>
+
+## Prerequisites
+
+All setup methods require the following:
+
+- **Git** — to clone the repository
+- **Ruby 3.4.8** — via `rvm` or `rbenv`
+- **Node.js v14 or newer**
+- **Python 3.5 or newer** — for the setup script
+- **MySQL or MariaDB**
+- **Redis**
+
+---
+
+## Script setup
+
+The `setup.py` script automates environment setup on Debian-based Linux (Debian, Ubuntu), Fedora, and macOS.
+
+<Note>
+  On Windows, the recommended approach is to use Ubuntu with WSL 2 and then run the script from the Ubuntu terminal.
+</Note>
+
+### Windows (WSL 2) setup
+
+<Steps>
+  <Step title="Enable WSL and Virtual Machine Platform">
+    Open **Turn Windows features on or off** from the Control Panel, then enable both **Windows Subsystem for Linux** and **Virtual Machine Platform**. Restart when prompted.
+  </Step>
+  <Step title="Install Ubuntu">
+    Install the Ubuntu app from the Microsoft Store, then optionally install Windows Terminal for a better experience.
+  </Step>
+  <Step title="Set up RVM in Ubuntu">
+    Open the Ubuntu terminal and run:
+
+    ```bash
+    sudo apt-add-repository -y ppa:rael-gc/rvm
+    sudo apt install rvm
+    sudo usermod -a -G rvm $USER
+    ```
+
+    Close and reopen the terminal to activate RVM.
+  </Step>
+  <Step title="Clone the repository and install Ruby">
+    ```bash
+    git clone https://github.com/your_username/WikiEduDashboard.git
+    cd WikiEduDashboard
+    rvm install 3.4.8
+    ```
+  </Step>
+  <Step title="Install MariaDB and run the setup script">
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y mariadb-server libmariadb-dev
+    sudo /etc/init.d/mariadb start
+    python3 setup.py
+    ```
+  </Step>
+  <Step title="Build assets and start the server">
+    ```bash
+    yarn build
+    rails s
+    ```
+
+    The app is now accessible at `http://localhost:3000`.
+  </Step>
+</Steps>
+
+### macOS and Debian/Ubuntu
+
+<Steps>
+  <Step title="Clone the repository">
+    Fork the repo on GitHub, then clone your fork:
+
+    ```bash
+    git clone https://github.com/your_username/WikiEduDashboard.git
+    cd WikiEduDashboard
+    ```
+  </Step>
+  <Step title="Run the setup script">
+    ```bash
+    python3 setup.py
+    ```
+
+    The script detects your OS and runs the appropriate installer. It will prompt for your root password and MySQL passwords. On macOS, the MySQL root password will be blank if the installer does not prompt you to set one.
+
+    If the script fails, check `setup/log.txt` for details.
+  </Step>
+</Steps>
+
+### Script troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Custom database configuration">
+    Create `config/database.yml` from `config/database.example.yml` before running the script, then run migrations manually if needed:
+
+    ```bash
+    rake db:migrate
+    ```
+  </Accordion>
+  <Accordion title="MySQL password issues">
+    Confirm your MySQL password, delete `config/database.yml`, then re-run the script.
+  </Accordion>
+  <Accordion title="Unsupported operating system">
+    Try running the OS-specific script from the `setup/` directory directly, or follow the manual setup below.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Manual setup
+
+Use this path if the script doesn't work for your OS, or if you want to control each step yourself.
+
+### Install dependencies
+
+<Steps>
+  <Step title="Install Ruby 3.4.8">
+    <Tabs>
+      <Tab title="macOS">
+        Install a GPG utility (e.g., GPG Suite from gpgtools.org), then use `rvm` or `rbenv`:
+
+        ```bash
+        rvm install 3.4.8 && rvm use 3.4.8
+        # or
+        rbenv install 3.4.8 && rbenv local 3.4.8
+        ```
+      </Tab>
+      <Tab title="Debian/Ubuntu">
+        ```bash
+        rvm install 3.4.8 && rvm use 3.4.8
+        # or
+        rbenv install 3.4.8 && rbenv local 3.4.8
+        ```
+      </Tab>
+      <Tab title="Windows">
+        Install Ruby via [RailsInstaller](http://railsinstaller.org/en) and the [Ruby DevKit](https://github.com/oneclick/rubyinstaller/wiki/Development-Kit).
+
+        <Note>WSL 2 with Ubuntu is strongly recommended over a native Windows install.</Note>
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install Node.js">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install node
+        ```
+      </Tab>
+      <Tab title="Debian/Ubuntu">
+        ```bash
+        sudo apt install nodejs
+        ```
+      </Tab>
+      <Tab title="Windows">
+        Download and run the installer from [nodejs.org](https://nodejs.org/).
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install MySQL or MariaDB">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install mariadb
+        brew services start mariadb
+        ```
+
+        <Note>
+          If you see `Can't connect to local MySQL server through socket '/tmp/mysql.sock'`, fix permissions first:
+
+          ```bash
+          sudo chown -R _mysql:mysql /usr/local/var/mysql
+          ```
+
+          Then restart the service.
+        </Note>
+      </Tab>
+      <Tab title="Debian/Ubuntu">
+        ```bash
+        sudo apt-get install -y mariadb-server libmariadb-dev
+        ```
+      </Tab>
+      <Tab title="Windows">
+        Install [XAMPP](https://www.apachefriends.org/index.html), which includes MySQL.
+      </Tab>
+    </Tabs>
+
+    Once the database server is running, create the databases and user:
+
+    <Tabs>
+      <Tab title="macOS/Debian">
+        ```bash
+        sudo mysql
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```bash
+        C:\xampp\mysql\bin\mysql -u root
+        ```
+      </Tab>
+    </Tabs>
+
+    Then run the following SQL:
+
+    ```sql
+    CREATE DATABASE dashboard DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+    CREATE DATABASE dashboard_testing DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+    CREATE USER 'wiki'@'localhost' IDENTIFIED BY 'wikiedu';
+    GRANT ALL PRIVILEGES ON dashboard.* TO 'wiki'@'localhost';
+    GRANT ALL PRIVILEGES ON dashboard_testing.* TO 'wiki'@'localhost';
+    FLUSH PRIVILEGES;
+    exit
+    ```
+  </Step>
+
+  <Step title="Install Redis">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install redis
+        ```
+      </Tab>
+      <Tab title="Debian/Ubuntu">
+        ```bash
+        sudo apt install redis-server
+        ```
+      </Tab>
+      <Tab title="Windows">
+        Download [the Windows port](https://github.com/MSOpenTech/redis/releases) from Microsoft Open Tech.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install Pandoc">
+    <Tabs>
+      <Tab title="macOS">
+        See the [Pandoc installation guide](https://pandoc.org/installing.html) for macOS instructions.
+      </Tab>
+      <Tab title="Debian/Ubuntu">
+        ```bash
+        sudo apt install pandoc
+        ```
+      </Tab>
+      <Tab title="Windows">
+        See the [Pandoc installation guide](https://pandoc.org/installing.html) for Windows instructions.
+      </Tab>
+    </Tabs>
+
+    Only Pandoc itself is needed — no additional components like LaTeX are required.
+  </Step>
+</Steps>
+
+### Initialize the application
+
+<Steps>
+  <Step title="Clone the repository">
+    Fork the repo on GitHub, then clone your fork:
+
+    ```bash
+    git clone https://github.com/your_username/WikiEduDashboard.git
+    cd WikiEduDashboard
+    ```
+  </Step>
+
+  <Step title="Install Ruby gems">
+    ```bash
+    gem install bundler
+    bundle install
+    ```
+
+    <Note>
+      If gems fail to install, you may need additional system libraries:
+
+      ```bash
+      sudo apt-get install libmysqlclient-dev libpq-dev
+      ```
+    </Note>
+  </Step>
+
+  <Step title="Copy config files">
+    ```bash
+    cp config/application.example.yml config/application.yml
+    cp config/database.example.yml config/database.yml
+    ```
+
+    The default `database.yml` is pre-configured to connect to the `wiki` user and `dashboard` database created above. The default credentials are:
+
+    ```yaml
+    username: wiki
+    password: wikiedu
+    host: 127.0.0.1
+    port: 3306
+    ```
+
+    Review `config/application.yml` for feature flags and optional settings, such as `wiki_education`, `disable_wiki_output`, and `hot_loading`.
+  </Step>
+
+  <Step title="Run database migrations">
+    ```bash
+    rake db:migrate
+    rake db:migrate RAILS_ENV=test
+    ```
+  </Step>
+
+  <Step title="Install JavaScript dependencies">
+    [Install Yarn Modern](https://yarnpkg.com/getting-started/install), then:
+
+    ```bash
+    yarn
+    ```
+  </Step>
+
+  <Step title="Configure Git hooks (recommended)">
+    Set up a pre-commit hook to run linting before each commit:
+
+    ```bash
+    git config core.hooksPath .git-hooks
+    chmod +x .git-hooks/pre-commit
+    ```
+
+    Optionally, set up a `post-merge` hook to automatically update dependencies when `package.json` or `Gemfile` changes:
+
+    ```bash
+    cp .git-hooks/pull-update-deps .git/hooks/post-merge
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Populate development data
+
+After setup, populate your database with sample courses and editing activity:
+
+```bash
+rake dev:populate
+```
+
+This creates example courses with users. To also import revision and upload data, start Sidekiq or run updates from the Rails console.
+
+<Tip>
+  See the [user roles documentation](/user-roles) for how to set up test users and role-specific data.
+</Tip>
+
+---
+
+## Running the development server
+
+<Steps>
+  <Step title="Start Redis">
+    Redis is required by Sidekiq. On Linux it typically runs as a daemon after installation. On macOS, start it manually:
+
+    ```bash
+    redis-server
+    # or, if installed via Homebrew:
+    redis-server /usr/local/etc/redis.conf
+    ```
+  </Step>
+
+  <Step title="Start the Rails server">
+    <Tabs>
+      <Tab title="macOS/Debian">
+        Use `guard`, which starts the development server on `localhost:3000`, watches for file changes, and auto-runs tests:
+
+        ```bash
+        guard
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```bash
+        rails s
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Compile JavaScript and CSS assets">
+    In a separate terminal, run the asset watcher:
+
+    ```bash
+    yarn start
+    ```
+
+    This builds and watches `app/assets/javascripts` and stylesheets, recompiling on changes. Use `yarn build` instead to generate a minified production build.
+  </Step>
+
+  <Step title="Open the app">
+    Visit `http://localhost:3000` in your browser. Sign in and go to `http://localhost:3000/campaigns` to create your first campaign.
+  </Step>
+</Steps>
+
+---
+
+## Hot Module Replacement
+
+For React-heavy pages, Hot Module Replacement (HMR) lets you see component changes in the browser without a full page reload.
+
+To enable HMR:
+
+1. Set `hot_loading` to `'true'` in `config/application.yml`:
+
+   ```yaml
+   hot_loading: 'true'
+   ```
+
+2. Start the HMR server:
+
+   ```bash
+   yarn hot
+   ```
+
+<Warning>
+  With HMR enabled, no files are written to disk — assets are served from memory. To run the test suite, which requires files on disk, use `yarn build` instead.
+</Warning>
+
+---
+
+## Design reference
+
+The living style guide shows the design building blocks available for new features:
+
+```
+http://localhost:3000/styleguide
+```

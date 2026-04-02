@@ -1,0 +1,138 @@
+---
+title: "Internationalization (i18n)"
+description: "How interface strings are organised, how to add new strings in Ruby and JavaScript, and how community translations are managed through translatewiki.net."
+---
+
+The Dashboard uses the Rails i18n system for all interface strings. Community translations are contributed and maintained through [translatewiki.net](https://translatewiki.net/wiki/Translating:Wiki_Ed_Dashboard). Over 150 locale files live in `config/locales/`.
+
+## File layout
+
+| File | Purpose |
+|---|---|
+| `config/locales/en.yml` | Canonical English strings — the source of truth |
+| `config/locales/qqq.yml` | Documentation strings that describe each key for translators |
+| `config/locales/<lang>.yml` | Community translations synced from translatewiki.net |
+
+All other locale files are updated periodically by the translatewiki.net integration and should not be edited manually.
+
+<Note>
+Training module content and assignment wizard copy are **not** stored in `en.yml`. Only general interface strings go there.
+</Note>
+
+## Adding new strings
+
+When you add a new interface string, you must add it to **both** `en.yml` and `qqq.yml`.
+
+### 1. Add the English string
+
+Add your key under the appropriate namespace in `config/locales/en.yml`:
+
+```yaml
+# config/locales/en.yml
+en:
+  courses:
+    my_new_label: "Enrolled students"
+```
+
+Nest keys to match the component or domain they belong to. The top-level key for most UI strings is `courses`, `users`, `assignments`, `articles`, or `application`.
+
+### 2. Document the string for translators
+
+Add a matching entry in `config/locales/qqq.yml` that explains the context:
+
+```yaml
+# config/locales/qqq.yml
+qqq:
+  courses:
+    my_new_label: >
+      Label for the count of students who have enrolled in a course.
+      Appears on the course overview page next to a number.
+```
+
+Good documentation entries describe:
+- Where in the UI the string appears
+- What variables (if any) are interpolated into it
+- Any constraints on length or tone
+
+## Using strings in Ruby
+
+Within Rails views and controllers, use the `t()` helper with a dot-separated key path:
+
+```ruby
+# In a view template (ERB)
+<%= t('courses.my_new_label') %>
+
+# In a controller or model
+I18n.t('courses.course_description')
+```
+
+## Using strings in JavaScript
+
+The locale data is compiled into an `I18n.js` module at build time. Access strings with `I18n.t()`:
+
+```javascript
+import I18n from 'i18n-js';
+
+// Simple key lookup
+const label = I18n.t('users.mainspace_chars');
+
+// With interpolation
+const message = I18n.t('courses.students_count', { count: 42 });
+```
+
+## Course-type-specific strings
+
+Some interface labels differ depending on whether the course is a Wiki Education student program or a general community program — for example, "Student" vs. "Editor" or "Course" vs. "Program".
+
+Use `CourseUtils.i18n` in JavaScript components to look up these strings with an automatic fallback:
+
+```javascript
+import CourseUtils from '@components/util/course_utils.js';
+
+// Looks up `<string_prefix>.expected_students` first,
+// then falls back to `courses.expected_students`
+const label = CourseUtils.i18n('expected_students', course.string_prefix);
+```
+
+The `string_prefix` property on a course object corresponds to the course type (e.g. `courses` for a standard course, `programs` for a program). This allows the same component to render different labels depending on context without branching logic in the component itself.
+
+For a working example, see the [Details component](https://github.com/WikiEducationFoundation/WikiEduDashboard/blob/main/app/assets/javascripts/components/overview/details.jsx) in the course Overview.
+
+## translatewiki.net integration
+
+Translations are crowd-sourced through translatewiki.net. The workflow is:
+
+1. You add new keys to `en.yml` and `qqq.yml` and merge to the main branch.
+2. translatewiki.net pulls the updated source strings automatically.
+3. Community translators add or update translations on translatewiki.net.
+4. Updated locale files are periodically exported and merged back into the repository as `config/locales/<lang>.yml`.
+
+Do not edit translated locale files directly — your changes will be overwritten on the next sync.
+
+## qqq.yml documentation format
+
+The `qqq` pseudo-language is a translatewiki.net convention for storing translator documentation alongside the strings it describes. Each value should be a human-readable explanation in English.
+
+```yaml
+qqq:
+  application:
+    cancel: |-
+      Button to cancel an action
+      {{Identical|Cancel}}
+    error: Label for error messages
+  courses:
+    assignment_start: >
+      Label for the date field that marks when article assignments begin.
+      Shown in the course details edit form.
+  number:
+    human:
+      decimal_units:
+        format: >
+          Format for abbreviating a large number.
+          'n' represents the number and 'u' represents the units.
+        units:
+          thousand: abbreviation for thousand (1000)
+          million: abbreviation for million (1,000,000)
+```
+
+The `{{Identical|...}}` template is a translatewiki.net hint indicating the string is identical to a common word in many languages and may not need translation.

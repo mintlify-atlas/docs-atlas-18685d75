@@ -1,0 +1,152 @@
+---
+title: "Monitoring & Observability"
+description: "How to monitor the Programs & Events Dashboard using Grafana, Server Admin Logs, Prometheus alerts, Sentry, and Toolforge Kubernetes status."
+---
+
+The Programs & Events Dashboard is hosted in the **Wikimedia Cloud VPS** `globaleducation` project. Several monitoring tools are available to track system health, catch errors, and investigate incidents.
+
+---
+
+## Monitoring Tools
+
+<CardGroup cols={2}>
+  <Card title="Grafana" icon="chart-bar">
+    Dashboards for infrastructure-level metrics across the `globaleducation` Cloud VPS project. Shows CPU, memory, disk, and network stats for all VMs.
+
+    **Access:** [Cloud VPS Project Board](https://grafana.wmcloud.org/d/0g9N-7pVz/cloud-vps-project-board?orgId=1&var-project=globaleducation)
+
+    Also available:
+    [Puppet agent logs](https://grafana.wmcloud.org/d/SQM7MJZSz/cloud-vps-puppet-agents?orgId=1&var-project=globaleducation&from=now-2d&to=now)
+  </Card>
+  <Card title="Server Admin Logs (SAL)" icon="scroll">
+    A chronological log of administrative actions taken on the `globaleducation` project infrastructure — deploys, reboots, config changes, and notes left by operators.
+
+    **Access:** [SAL for globaleducation](https://sal.toolforge.org/globaleducation)
+  </Card>
+  <Card title="Prometheus Alerts" icon="bell">
+    Active alerts for the `globaleducation` project. Shows firing and pending alert conditions based on infrastructure metrics.
+
+    **Access:** [Active Alerts](https://prometheus-alerts.wmcloud.org/?q=%40state%3Dactive&q=project%3Dglobaleducation)
+  </Card>
+  <Card title="Toolforge Kubernetes Status" icon="cubes">
+    Shows the Kubernetes namespace details for each Toolforge tool integrated with the Dashboard, including pod status and recent logs.
+
+    **Access:** Replace `toolName` in the URL below with the tool's identifier:
+    `https://k8s-status.toolforge.org/namespaces/tool-toolName/`
+
+    Example tools: `wikiedudashboard`, `reference-counter`, `ruby-suspected-plagiarism`
+  </Card>
+  <Card title="Sentry" icon="bug">
+    Captures application-level exceptions and error traces from the Rails application. Each error includes a stack trace, request context, and user information to aid debugging.
+
+    Sentry is configured in the application via the `config/initializers/sentry.rb` setup (using the `SENTRY_DSN` environment variable from `application.yml`).
+  </Card>
+  <Card title="Sidekiq Web UI" icon="list-check">
+    Real-time view of the Sidekiq job queues, running workers, scheduled jobs, retries, and dead jobs. Admin-only.
+
+    **Access:** `/sidekiq` (must be logged in as a Dashboard admin)
+
+    See the [Admin Guide](/operations/admin-guide) for details on using the Sidekiq UI.
+  </Card>
+</CardGroup>
+
+---
+
+## Grafana Dashboards
+
+The **Cloud VPS Project Board** in Grafana provides a unified view of all virtual machines in the `globaleducation` project.
+
+### What to Look For
+
+<AccordionGroup>
+  <Accordion title="CPU and Memory Usage">
+    Sustained high CPU or memory on `peony-web` may indicate the web server is overloaded — this can cause slow responses or Internal Server Errors. High memory on a Sidekiq server usually means a large job is running.
+
+    If a VM is consistently above 90% CPU or memory, consider whether a queue needs to be paused or the VM needs to be rebooted.
+  </Accordion>
+  <Accordion title="Disk Usage">
+    Watch disk usage on `peony-database`. The database volume fills up over time as revisions accumulate. When disk usage is critical, the database may stop accepting writes.
+
+    See [Production Troubleshooting](/operations/production-troubleshooting) for disk expansion procedures.
+  </Accordion>
+  <Accordion title="Puppet Agent Logs">
+    The [Puppet agent logs dashboard](https://grafana.wmcloud.org/d/SQM7MJZSz/cloud-vps-puppet-agents?orgId=1&var-project=globaleducation&from=now-2d&to=now) shows whether configuration management is running correctly on all VMs. Failures here may indicate a VM is drifting from its intended configuration.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Server Admin Logs (SAL)
+
+SAL is the canonical record of operator actions on the infrastructure. Every time an admin reboots a VM, deploys new code, or makes a configuration change, it should be logged here.
+
+To add an entry, use the `!log` command in the `#wikimedia-cloud` IRC channel or via the SAL web interface at [sal.toolforge.org](https://sal.toolforge.org/globaleducation).
+
+---
+
+## Prometheus Alerts
+
+Prometheus continuously evaluates alert rules against infrastructure metrics. When an alert fires, it appears in the [active alerts view](https://prometheus-alerts.wmcloud.org/?q=%40state%3Dactive&q=project%3Dglobaleducation).
+
+Common alerts to investigate:
+
+| Alert | Likely cause |
+|---|---|
+| High disk usage on database VM | Revision data accumulation; may need storage expansion |
+| VM unreachable | Network issue or crashed VM; may need reboot from Horizon |
+| High load on web VM | Traffic spike or runaway background job |
+
+---
+
+## Toolforge Kubernetes Namespace Status
+
+Each Toolforge tool used by the Dashboard runs in its own Kubernetes namespace. To check the health of a tool:
+
+<Steps>
+  <Step title="Construct the status URL">
+    Use the pattern: `https://k8s-status.toolforge.org/namespaces/tool-{toolName}/`
+
+    For example, for the `wikiedudashboard` tool:
+    `https://k8s-status.toolforge.org/namespaces/tool-wikiedudashboard/`
+  </Step>
+  <Step title="Check pod status">
+    The namespace page shows running pods, their status, and recent restart counts. A pod in `CrashLoopBackOff` or `Error` state needs investigation.
+  </Step>
+  <Step title="Review logs">
+    Pod logs are accessible from the namespace view and can reveal errors in the PHP endpoints or other tool code.
+  </Step>
+</Steps>
+
+Key tools to monitor:
+
+- `tool-wikiedudashboard` — Replica database query endpoints
+- `tool-reference-counter` — Reference count API
+- `tool-ruby-suspected-plagiarism` — Plagiarism detection API
+
+---
+
+## Sentry Error Logging
+
+Sentry captures unhandled exceptions from the Rails application in real time. When a new exception occurs:
+
+1. Sentry creates an issue grouped by exception type and stack trace location.
+2. The issue includes the full stack trace, request parameters, user session data, and environment.
+3. Recurring issues show a frequency graph to help prioritize fixes.
+
+### Configuration
+
+Sentry is configured via the `SENTRY_DSN` key in `config/application.yml`. The DSN points to the project-specific Sentry ingest endpoint.
+
+<Note>
+  Sentry is only active in production. Errors in development and test environments are not forwarded.
+</Note>
+
+---
+
+## More Resources
+
+- [Infrastructure Overview](/operations/infrastructure-overview) — Servers and dependencies
+- [Production Troubleshooting](/operations/production-troubleshooting) — Responding to incidents
+- [Admin Guide](/operations/admin-guide) — Sidekiq queue management and admin tools
+- [Cloud VPS Documentation](https://wikitech.wikimedia.org/wiki/Help:Cloud_VPS)
+- [Toolforge Documentation](https://wikitech.wikimedia.org/wiki/Help:Toolforge)

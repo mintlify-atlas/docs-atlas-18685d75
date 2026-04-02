@@ -1,0 +1,91 @@
+---
+title: "Testing"
+description: "How to run the RSpec, Capybara, and Jest test suites for the Wiki Education Dashboard."
+---
+
+Testing is central to the Dashboard codebase. All new features should include tests, and PRs must pass both the Ruby and JavaScript test suites before merging.
+
+## Testing stack
+
+| Tool | Purpose |
+|------|---------|
+| [RSpec](https://rspec.info/) | Ruby unit tests — models, controllers, lib classes |
+| [Capybara](https://teamcapybara.github.io/capybara/) | End-to-end browser integration tests (`spec/features`) |
+| [Jest](https://jestjs.io/) | Frontend JavaScript and React component tests |
+
+## Running tests
+
+### Ruby tests
+
+```bash
+# Run all specs
+rspec
+
+# Run only feature (integration) tests
+rspec spec/features
+
+# Run only model tests
+rspec spec/models
+
+# Run only controller tests
+rspec spec/controllers
+```
+
+<Warning>
+  If deprecation warnings appear in the development JavaScript build, feature specs may fail. Run `yarn build` first to get the production build without warnings.
+</Warning>
+
+### JavaScript tests
+
+```bash
+# Run the full JS test suite
+yarn test
+
+# Watch mode — re-runs tests when files change
+jest --watch
+```
+
+### Full suite
+
+Run everything together with a fresh asset build:
+
+```bash
+yarn build && rspec && yarn test
+```
+
+## Test coverage
+
+### Generating coverage reports
+
+<Steps>
+  <Step title="Build assets and run the full suite with coverage enabled">
+    ```bash
+    yarn coverage
+    COVERAGE=true bundle exec rspec spec/
+    ```
+  </Step>
+  <Step title="Start the Rails server">
+    ```bash
+    rails s
+    ```
+  </Step>
+  <Step title="View the JavaScript coverage report">
+    Open `http://localhost:3000/js_coverage/index.html` in your browser.
+  </Step>
+</Steps>
+
+Ruby coverage is provided by **simplecov**. JavaScript coverage for RSpec feature tests is provided by **Istanbul**.
+
+## Writing tests
+
+- **New features** should be covered by RSpec feature specs in `spec/features/`
+- **Models and lib classes** should have unit specs in `spec/models/` and `spec/lib/`
+- **React components** should have Jest tests in `test/` alongside the source
+
+<Tip>
+  Feature specs test full user workflows through the browser. They are slower but catch integration issues that unit tests miss. Prefer feature specs for user-facing functionality.
+</Tip>
+
+## Continuous integration
+
+Tests run automatically on Travis CI for every pull request. The CI build takes approximately 30 minutes. The `production` branch auto-deploys when the unit test suite (excluding feature tests) passes.

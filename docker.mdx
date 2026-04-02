@@ -1,0 +1,183 @@
+---
+title: "Docker Development Setup"
+description: "Run the Wiki Education Dashboard in a fully containerized development environment using Docker and Docker Compose."
+---
+
+Docker Compose orchestrates the full stack — the Dashboard app, MySQL 8, and Redis — with a single command. The project directory is mounted into the container, so edits you make locally are reflected immediately without rebuilding the image.
+
+<Warning>
+  Docker support is not actively maintained as a primary workflow for this project. The instructions below may be out of date. If you get a working environment running after making adjustments, please open a pull request with the changes.
+</Warning>
+
+<Note>
+  For a local (non-containerized) setup, see [Local Development Setup](/setup).
+</Note>
+
+## Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Docker Compose plugin on Linux)
+- Git
+
+---
+
+## Services
+
+The `docker-compose.yaml` defines four services:
+
+| Service | Image | Description |
+|---------|-------|-------------|
+| `mysql` | `mysql:8` | Database server with a persistent volume |
+| `redis` | `redis:latest` | Cache and background job queue |
+| `init` | `wiki-edu-dashboard` | One-time container that initializes the database |
+| `app` | `wiki-edu-dashboard` | Rails + webpack dev server, mounts the project directory |
+
+The `app` service exposes port **3000** (Rails) and port **8080** (webpack WebSocket for live reloading).
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Clone the repository">
+    Fork the repo on GitHub, then clone your fork:
+
+    ```bash
+    git clone https://github.com/your_username/WikiEduDashboard.git
+    cd WikiEduDashboard
+    ```
+  </Step>
+
+  <Step title="Build the Docker image">
+    From the project root, build the `wiki-edu-dashboard` image:
+
+    ```bash
+    docker build -t wiki-edu-dashboard .
+    ```
+
+    The image is based on `ruby:3.1.2-slim` and includes Node.js 20, Yarn, Pandoc, and all Ruby gem and JavaScript dependencies. Configuration files (`application.yml` and `database.yml`) are copied from their example counterparts during the build.
+  </Step>
+
+  <Step title="Start all services">
+    ```bash
+    docker compose up
+    ```
+
+    Docker Compose starts the services in dependency order:
+
+    1. `mysql` and `redis` start and pass their health checks
+    2. `init` runs database initialization, then exits
+    3. `app` starts once `init` completes successfully
+
+    To run in the background, add the `-d` flag:
+
+    ```bash
+    docker compose up -d
+    ```
+
+    When startup is complete, you will see output similar to:
+
+    ```
+    => Booting Puma
+    => Rails 7.0.4 application starting in development
+    ...
+    webpack 5.73.0 compiled successfully in 17961 ms
+    ```
+  </Step>
+
+  <Step title="Open the app">
+    Visit `http://localhost:3000` in your browser. Changes you make to local files are reflected inside the container immediately.
+  </Step>
+</Steps>
+
+---
+
+## Environment variables
+
+The `app` and `init` containers receive the following environment variables, which must match the credentials used in the database initialization SQL:
+
+```yaml
+REDIS_URL: redis://redis:6379
+MYSQL_USER: wiki
+MYSQL_PASSWORD: wikiedu
+MYSQL_HOST: mysql
+MYSQL_PORT: 3306
+```
+
+These are defined in `docker-compose.yaml` and do not need to be set manually for local development.
+
+---
+
+## Running commands inside the container
+
+To open a shell in the running `app` container:
+
+```bash
+docker exec -it <container-name> /bin/bash
+```
+
+Find the container name with `docker compose ps` or `docker ps`.
+
+---
+
+## Monitoring
+
+Useful commands for inspecting the running containers:
+
+```bash
+# List running containers and resource usage
+docker ps
+
+# Follow logs for the app container
+docker logs -f <container-name>
+
+# Inspect container metadata
+docker inspect <container-id>
+
+# List built images
+docker images
+```
+
+You can also use [`ctop`](https://github.com/bcicen/ctop) for a terminal-based container monitor.
+
+---
+
+## Stopping and cleaning up
+
+```bash
+# Stop all services (preserves volumes)
+docker compose down
+
+# Stop and remove volumes (destroys database data)
+docker compose down -v
+```
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Permission errors on Linux">
+    If you see permission errors when editing files on the host, the container runs as root and has changed file ownership. Fix it by resetting ownership in the project root:
+
+    ```bash
+    sudo chown $USER:$GROUPS -R ./
+    ```
+  </Accordion>
+  <Accordion title="Cannot connect to database — hostname 'mysql' not resolved">
+    If you see the error `There is an issue connecting with your hostname mysql`, run the bundled helper script to update `/etc/hosts` with the MySQL container's IP address:
+
+    ```bash
+    bash ./update_hosts.sh
+    ```
+
+    This script is designed for Fedora-based Linux distributions.
+  </Accordion>
+  <Accordion title="Rebuilding after dependency changes">
+    If you change the `Gemfile`, `package.json`, or `Dockerfile`, rebuild the image before starting Compose:
+
+    ```bash
+    docker build -t wiki-edu-dashboard .
+    docker compose up
+    ```
+  </Accordion>
+</AccordionGroup>

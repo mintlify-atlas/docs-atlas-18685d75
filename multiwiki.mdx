@@ -1,0 +1,97 @@
+---
+title: "Multi-Wiki Support"
+description: "How the Dashboard tracks edits across multiple Wikimedia wikis, how wikis are modelled in the database, and how courses configure their tracked wikis."
+---
+
+The Dashboard was originally built for English Wikipedia. Multi-wiki support was added in February 2016 to accommodate articles and edits from any [Wikimedia project wiki](https://meta.wikimedia.org/wiki/Wikimedia_wikis#Core_projects). This page explains the data model and how courses use it.
+
+## Supported wikis
+
+The Dashboard can track contributions to any wiki that Wikimedia operates, including:
+
+- **Wikipedia** — all language editions (e.g. `en.wikipedia.org`, `fr.wikipedia.org`)
+- **Wikidata** — `www.wikidata.org`
+- **Wikimedia Commons** — `commons.wikimedia.org`
+- **Other Wikimedia projects** — Wiktionary, Wikisource, Wikiversity, Wikivoyage, and others
+
+Support for non-Wikimedia wikis (third-party or self-hosted) is possible in principle but not currently implemented.
+
+## The Wiki model
+
+Each wiki referenced in the application has exactly one row in the `wikis` table. A wiki is uniquely identified by the combination of its **language** and **project**:
+
+| Field | Example values |
+|---|---|
+| `language` | `en`, `fr`, `de`, `www` |
+| `project` | `wikipedia`, `wikidata`, `commons` |
+
+For language-independent projects (Wikidata, Commons), the language is stored as `www`.
+
+### Why a dedicated model?
+
+Before multi-wiki support, MediaWiki page IDs (`mw_page_id`) were used directly as primary keys for articles and revisions. This works only when all entities live on one wiki — two different wikis can assign the same numeric ID to different pages.
+
+The refactor decoupled local primary IDs from MediaWiki IDs:
+
+- Local database rows use auto-incremented primary keys.
+- `mw_page_id` columns store the per-wiki MediaWiki page ID, used during sync and deduplication.
+- Every article, revision, and on-wiki entity carries a foreign key to the `wikis` table.
+
+## Home wiki
+
+Each course (and conceptually each user) has a **home wiki**: one wiki from the set of wikis it interacts with, used as the default when the code needs a single representative wiki. Currently this is chosen arbitrarily from the course's wiki list, falling back to the application default wiki if none is set.
+
+<Note>
+The home wiki concept is a transitional convenience introduced during the multi-wiki refactor. It is subject to change as the data model matures.
+</Note>
+
+## Course wiki configuration
+
+A course can track edits to one or more wikis simultaneously. The set of tracked wikis is stored as an association between the course and the `wikis` table.
+
+When a course update runs, the Dashboard queries the revision history for each tracked wiki and attributes edits to the course participants.
+
+### Default wiki
+
+The application-level default wiki is controlled by `wiki_language` in `application.yml`:
+
+```yaml
+wiki_language: en
+```
+
+This sets the default Wikipedia language edition used for login and as the fallback when no specific wiki is configured.
+
+### Per-wiki edit permissions
+
+Updating course pages on-wiki (mirroring course metadata to Wikipedia) must be enabled per wiki in `application.yml`:
+
+```yaml
+disable_wiki_output: 'false'
+edit_en.wikipedia.org: 'true'
+edit_pt.wikipedia.org: 'true'
+```
+
+A wiki that is not listed here will not receive automated edits even if `disable_wiki_output` is `false`.
+
+You can also set a custom course page prefix per wiki:
+
+```yaml
+course_prefix_cs.wikipedia.org: 'Project:Nástěnka'
+```
+
+## Database schema
+
+The multi-wiki schema change introduced a relationship where all on-wiki entities (articles, revisions, uploads) reference the `wikis` table. A simplified view:
+
+- `wikis` — one row per wiki, identified by `(language, project)`
+- `articles` — each has a `wiki_id` foreign key and a `mw_page_id`
+- `revisions` — each has a `wiki_id` and references an article
+- `courses_wikis` — join table linking courses to the wikis they track
+
+This allows the same MediaWiki page ID to appear in multiple wikis without collision, and allows all queries to be scoped to a specific wiki.
+
+## Migration notes
+
+The initial migration to the multi-wiki schema was designed to be mostly reversible. Because all pre-migration data lived on the default wiki, primary IDs were copied to `mw_page_id` columns and every entity was assigned the default wiki record.
+
+As multi-wiki data accumulates, rollback becomes riskier: two entities from different wikis may share the same `mw_page_id`, and one would be lost in a reverse migration. Check for this condition manually before attempting a rollback.

@@ -1,0 +1,185 @@
+---
+title: "Application Configuration"
+description: "Reference for the key settings in application.yml that control deployment mode, authentication, and developer options."
+---
+
+The Dashboard is configured primarily through `config/application.yml`. Rails secrets (cookie key, domain name) live in `config/secrets.yml`. Neither file is committed to the repository — you create them by copying the provided examples.
+
+## Copying the example files
+
+```bash
+cp config/application.example.yml config/application.yml
+cp config/secrets.example.yml config/secrets.yml
+```
+
+Edit `application.yml` to match your local environment. Most defaults are suitable for development without changes.
+
+## Deployment modes
+
+The single most important setting is `wiki_education`. It switches the entire application between two distinct configurations.
+
+```yaml
+# Wiki Education Dashboard (dashboard.wikiedu.org)
+wiki_education: 'true'
+
+# Programs & Events Dashboard (outreachdashboard.wmflabs.org)
+wiki_education: 'false'
+```
+
+| Behaviour | `wiki_education: true` | `wiki_education: false` |
+|---|---|---|
+| Default course type name | Course | Program |
+| Default participant name | Student | Editor |
+| Course approval | Admin must approve | Approved on creation |
+| Training content | Loaded from local `.yml` files | Loaded from meta.wikimedia.org |
+| Target audience | US/Canada college programs | Global Wikimedia community |
+
+The example file (`application.example.yml`) defaults to `wiki_education: 'false'` (Programs & Events mode). Switch it to `'true'` if you are developing Wiki Education-specific features.
+
+## Key settings
+
+### Dashboard identity
+
+```yaml
+dashboard_title: Programs and Events Dashboard
+dashboard_url: outreachdashboard.wmflabs.org
+meta_description: Programs and Events dashboard for Wikimedia editing projects
+contact_email: 'contact@wikiedu.org'
+```
+
+`dashboard_url` must match the domain the app is served from. For local development, `localhost:3000` is set in `config/secrets.yml` instead.
+
+### OAuth credentials
+
+```yaml
+wikipedia_token: 6e171fe7c5fc549ecce52471d22a6b0a
+wikipedia_secret: 7f345a52566194a19d2adba5fcbb802e8c79f7ef
+```
+
+The example file ships with a read-only development consumer that allows login but cannot make Wikipedia edits. Replace these with your own consumer tokens when developing edit-related features. See [OAuth Setup](/oauth-setup) for how to register a consumer.
+
+```yaml
+oauth_ids: '252,212'
+```
+
+Comma-separated list of OAuth consumer IDs (CIDs) the system recognises as its own when scanning edit tags. Add the CID of any consumer you register.
+
+### Wiki output
+
+```yaml
+disable_wiki_output: 'true'
+```
+
+When `'true'`, the Dashboard will not mirror course pages to Wikipedia or attempt any on-wiki edits. **Leave this enabled in development** unless you are specifically testing wiki-write features.
+
+To enable edits to a specific wiki, add a per-wiki flag:
+
+```yaml
+disable_wiki_output: 'false'
+edit_en.wikipedia.org: 'true'
+edit_pt.wikipedia.org: 'true'
+```
+
+<Warning>
+Even in development, if you use a custom OAuth consumer and set `disable_wiki_output: 'false'`, the app will make live edits to public Wikipedia pages under your account. Only do this intentionally.
+</Warning>
+
+### Default wiki language
+
+```yaml
+wiki_language: en
+```
+
+Sets the language of the default Wikipedia instance used for login and as the fallback wiki when no wiki is specified.
+
+### Course page prefixes
+
+```yaml
+course_prefix: 'User:Ragesock'
+course_talk_prefix: 'User_talk:Ragesock'
+course_announcement_page: 'User:Ragesock'
+```
+
+In production these point to a namespace reserved for Dashboard course pages (e.g. the `Wikipedia:` namespace). In development, your own userspace is safe to use so that test pages do not pollute public namespaces.
+
+### Error tracking
+
+```yaml
+sentry_dsn: 'http://somelongkey:anotherlongkey@sentry.myserver.com/1'
+```
+
+A [Sentry](https://sentry.io) project DSN. Leave the placeholder value in development; Sentry integration is only needed in staging and production.
+
+### Hot loading
+
+```yaml
+hot_loading: 'false'
+```
+
+Set to `'true'` to enable Webpack hot module replacement during frontend development. This requires the Yarn dev server to be running (`yarn hot`). It has no effect in production.
+
+### Update behaviour
+
+```yaml
+update_length: "30"
+```
+
+How many days after a course ends the Dashboard continues pulling fresh statistics for it.
+
+```yaml
+# no_views: "true"
+```
+
+Uncomment to disable pageview statistics updates entirely (useful when developing features unrelated to view counts).
+
+### Training content
+
+```yaml
+training_slides_wiki_page: 'Training modules/dashboard/slides'
+training_modules_wiki_page: 'Training modules/dashboard/modules'
+training_libraries_wiki_page: 'Training modules/dashboard/libraries'
+```
+
+Only used in Programs & Events mode (`wiki_education: false`). These meta.wikimedia.org pages act as the index for training content that is fetched at runtime.
+
+### Timeslice processing
+
+```yaml
+TIMESLICE_DURATION: '86400'
+```
+
+Duration in seconds for each timeslice used when processing course data updates. The default of `86400` equals one day.
+
+### Branding
+
+```yaml
+logo_file: "outreach-logo.png"
+favicon_file: "outreach-logo.png"
+favicon_dev_file: "favicon_dev.png"
+```
+
+Filenames under the `/images` directory. Swap these to customise the logo and favicon for a new deployment.
+
+## Secrets file
+
+`config/secrets.yml` holds the Rails session secret and domain name. The development values from the example file are safe to use as-is.
+
+```yaml
+development:
+  domain_name: localhost:3000
+  secret_key_base: <long random hex string>
+```
+
+Generate a new `secret_key_base` with:
+
+```bash
+rails secret
+```
+
+In staging and production the values are read from environment variables:
+
+```yaml
+production:
+  domain_name: <%= ENV["DOMAIN_NAME"] %>
+  secret_key_base: <%= ENV["SECRET_KEY_BASE"] %>
+```

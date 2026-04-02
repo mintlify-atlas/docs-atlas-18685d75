@@ -1,0 +1,175 @@
+---
+title: "Analytics Pipeline"
+description: "How the Wiki Education Dashboard collects, processes, and stores Wikipedia edit data for courses."
+---
+
+The dashboard continuously imports data from Wikipedia and related APIs to produce per-course statistics: bytes added, references added, article quality scores, article view counts, and more. This page describes how that pipeline is structured.
+
+## Overview
+
+Data flows from external APIs into the database through a set of importers, orchestrated by Sidekiq background workers on a schedule defined in `config/schedule.yml`. The core design principle since the data-rearchitecture is **timeslice-based storage**: instead of recording every individual revision, the system aggregates revision statistics into fixed time windows and stores only the aggregates.
+
+## Data sources
+
+<CardGroup cols={2}>
+  <Card title="WMFLabsTools / Replica DB" icon="database">
+    The primary source for revision and article data. Provides edit history, contributor usernames, byte deltas, and article metadata via the Wikimedia replica databases.
+
+    Used by: `RevisionDataManager`, `ArticleImporter`
+  </Card>
+  <Card title="MediaWiki API" icon="code">
+    Authoritative source for current article state, upload metadata, user registration info, and revision parent IDs. Used when freshness matters, because the replica database may have replication lag.
+
+    Used by: `ArticleImporter`, `UserImporter`, `UploadImporter`, `RevisionScoreImporter`
+  </Card>
+  <Card title="Lift Wing (ORES)" icon="chart-bar">
+    Machine-learning API that produces article quality scores (WP10 scale). The dashboard fetches scores for each revision and its parent to compute quality change (`wp10` and `wp10_previous`).
+
+    Used by: `RevisionScoreImporter`
+  </Card>
+  <Card title="Reference Counter API" icon="list">
+    Counts the number of references in a Wikipedia article revision. Used to compute references added per course.
+
+    Used by: `RevisionScoreImporter`
+  </Card>
+  <Card title="WikiWho API" icon="user">
+    Provides authorship attribution for article content, enabling the dashboard to attribute bytes of article text to specific editors.
+  </Card>
+  <Card title="PagePile / PetScan" icon="filter">
+    External tools that supply lists of article titles for article-scoped programs. `PagePileApi` and `PetScanApi` fetch article title lists by pile ID or PetScan query ID.
+  </Card>
+</CardGroup>
+
+## Key importers
+
+### ArticleImporter
+
+`lib/importers/article_importer.rb`
+
+Imports article records from Wikipedia into the local database. Accepts MediaWiki page IDs or titles. Queries the WMFLabsTools replica database (via `Replica`) or the MediaWiki API directly. After importing articles, it calls `AssignmentUpdater` to keep assignment records consistent with the latest article metadata.
+
+```ruby
+ArticleImporter.new(wiki, course).import_articles([69830902, 69834562])
+ArticleImporter.new(wiki, course).import_articles_by_title(['Climate change', 'Photosynthesis'])
+```
+
+### UploadImporter
+
+`lib/importers/upload_importer.rb`
+
+Imports files uploaded to Wikimedia Commons by course participants. Tracks upload counts per course (`upload_count`, `uploads_in_use_count`, `upload_usages_count`).
+
+### UserImporter
+
+`lib/importers/user_importer.rb`
+
+Creates and updates `User` records from Wikipedia OAuth data or by username lookup. On first login, `UserImporter.from_omniauth` creates a user record from the OAuth payload. `update_users` refreshes registration dates from the MetaWiki API for users where `registered_at` is nil.
+
+### RevisionDataManager
+
+`lib/revision_data_manager.rb`
+
+The central coordinator for fetching revision data. Operates in two distinct phases for performance:
+
+1. **`fetch_revision_data_for_course(timeslice_start, timeslice_end)`** — Queries the replica database for all revisions by course students within the time window. As a side effect it imports article records. Returns an array of `Revision` objects without scores.
+
+2. **`fetch_score_data_for_course(revisions)`** — Takes the array from step 1 and enriches each revision with quality scores from Lift Wing and reference counts from the Reference Counter API via `RevisionScoreImporter`.
+
+Tracked namespaces default to article (`0`), user (`2`), and draft (`118`) spaces.
+
+### RevisionScoreImporter
+
+`lib/importers/revision_score_importer.rb`
+
+Fetches scoring data in batches of 50 revisions. For each revision it fetches:
+- `wp10` — quality score of the revision
+- `wp10_previous` — quality score of the parent revision (to compute the change)
+- `features` — full feature vector from Lift Wing
+- `deleted` — whether the revision has been deleted from Wikipedia
+
+Parent revision IDs are resolved via the MediaWiki API before scores are fetched.
+
+### Extra data importers
+
+| Importer | Purpose |
+|---|---|
+| `AverageViewsImporter` | Updates average daily view counts for tracked articles |
+| `RatingImporter` | Updates article quality ratings from Wikipedia's assessment system |
+| `CategoryImporter` | Imports article titles belonging to a specified MediaWiki category |
+| `TransclusionImporter` | Imports article titles that transclude a given template or page |
+
+## Timeslice architecture
+
+Instead of storing a row per revision, the dashboard aggregates revision data into **timeslices** — fixed time windows per course per wiki. This was introduced in the data-rearchitecture deployment.
+
+Three timeslice tables collaborate:
+
+| Table | Granularity | Purpose |
+|---|---|---|
+| `course_wiki_timeslices` | Course × Wiki × time window | Aggregate stats for a wiki within a course period |
+| `article_course_timeslices` | Article × Course × time window | Tracks which articles were edited and by how many students |
+| `course_user_wiki_timeslices` | User × Course × Wiki × time window | Per-editor statistics within a course |
+
+When a course's start or end date changes, the affected boundary timeslices are flagged `needs_update: true` so they are recalculated on the next update cycle.
+
+The `Course#update_cache_from_timeslices` method reads these timeslices and recomputes the course-level cached counters:
+
+```ruby
+course.update_cache_from_timeslices
+```
+
+## Metrics tracked per course
+
+The `courses` table stores precomputed aggregate counters updated from timeslices:
+
+| Field | Description |
+|---|---|
+| `character_sum` | Total bytes added by students across all tracked articles |
+| `view_sum` | Sum of average daily article views for all tracked articles |
+| `user_count` | Number of enrolled students |
+| `article_count` | Number of articles edited |
+| `revision_count` | Total number of revisions made |
+| `new_article_count` | Number of new articles created |
+| `references_count` | Total references added |
+| `recent_revision_count` | Revisions in the recent activity window |
+| `upload_count` | Files uploaded to Wikimedia Commons |
+| `trained_count` | Students who have completed required training |
+
+## Scheduled tasks
+
+Background jobs are managed by **Sidekiq** with the **sidekiq-cron** plugin. The schedule is defined in `config/schedule.yml`.
+
+| Job | Schedule | Class | Purpose |
+|---|---|---|---|
+| Course updates | Every 5 minutes | `ScheduleCourseUpdatesWorker` | Enqueues update jobs for active and recently-ended courses |
+| Constant update | Every 4 minutes | `ConstantUpdateWorker` | Fetches revision metadata, generates alerts, and runs other frequent tasks for all current courses |
+| Daily update | Daily at 11:30 UTC | `DailyUpdateWorker` | Runs tasks that only need to execute once per day |
+| Survey emails | Mon–Thu at 17:15 UTC | `SurveyUpdateWorker` | Checks survey eligibility and sends survey notification emails |
+| Ticket notifications | Weekdays at 13:00 and 20:00 UTC | `TicketNotificationsWorker` | Emails admins about open support tickets |
+| Default campaign update | Jan 1 and Jul 1 at 00:01 UTC | `DefaultCampaignUpdateWorker` | Rotates the default campaign at the start of each academic semester |
+
+### Manual update
+
+To trigger an immediate data refresh for a single course without waiting for the scheduler:
+
+```
+GET /courses/School/CourseName_(Term)/manual_update
+```
+
+Or from the Rails console:
+
+```ruby
+course = Course.find_by(slug: 'School/CourseName_(Term)')
+UpdateCourseStats.new(course)
+```
+
+To run a full constant update from the console:
+
+```ruby
+require "#{Rails.root}/lib/data_cycle/constant_update"
+ConstantUpdate.new
+```
+
+<Warning>
+Running a `ConstantUpdate` in the console will make live network requests to Wikipedia APIs and may trigger wiki edits if your OAuth consumer has edit permissions configured.
+</Warning>

@@ -1,0 +1,81 @@
+---
+title: "Deployment"
+description: "How to deploy the Wiki Education Dashboard to staging, production, and wmflabs environments using Capistrano."
+---
+
+The Dashboard uses [Capistrano](https://capistranorb.com/) for deployment, with SSH-based authentication to the target servers. There are three deployment targets:
+
+| Environment | Branch | URL |
+|-------------|--------|-----|
+| `staging` | `staging` | dashboard-testing.wikiedu.org |
+| `production` | `production` | dashboard.wikiedu.org |
+| `wmflabs` | `wmflabs` | outreachdashboard.wmflabs.org |
+
+## Standard deployment
+
+<Steps>
+  <Step title="Merge changes to the target branch">
+    Push or merge your changes to `master`, then merge `master` into `production` or `staging` on GitHub.
+  </Step>
+  <Step title="Pause batch jobs if your change includes a migration">
+    Database migrations require pausing background jobs to prevent locks. Wait at least 2 hours for running updates to complete.
+    ```bash
+    cap production sake task="batch:pause"
+    ```
+    <Warning>
+      Skipping this step when deploying a migration can cause database deadlocks. Always pause before running migrations in production.
+    </Warning>
+  </Step>
+  <Step title="Deploy">
+    Staging and production deploy automatically via Travis CI after a successful unit test run. For wmflabs or manual deploys:
+    ```bash
+    cap wmflabs deploy
+    cap staging deploy
+    cap production deploy
+    ```
+  </Step>
+  <Step title="Resume batch jobs">
+    If you paused jobs in step 2, resume them after deployment:
+    ```bash
+    cap production sake task="batch:resume"
+    ```
+  </Step>
+  <Step title="Restart Sidekiq if needed">
+    If your changes affect code that runs through Sidekiq, restart the relevant queue:
+    ```bash
+    sudo systemctl restart <sidekiq-queue>
+    ```
+  </Step>
+</Steps>
+
+## Running rake tasks remotely
+
+Use Capistrano's `sake` command to run rake tasks on a server:
+
+```bash
+cap production sake task="batch:pause"
+cap production sake task="batch:resume"
+```
+
+<Note>
+  Batch updates are long-running. Avoid triggering them live through Capistrano — use the console or Sidekiq instead.
+</Note>
+
+## Recovery procedure
+
+If production goes down and you need to restore from scratch:
+
+<Steps>
+  <Step title="Set up a new production server">
+    The production Apache config and a sanitized `application.yml` are checked into the repository.
+  </Step>
+  <Step title="Import SSL certificates">
+    Use sslmate to import SSL certs onto the new server.
+  </Step>
+  <Step title="Create a new OAuth consumer">
+    Register a new consumer on meta.wikimedia.org and request expedited approval from a WMF developer. Add the tokens to `application.yml`.
+  </Step>
+  <Step title="Restore the database">
+    Import the latest database backup. Recent backups are stored on the production server and on `wikiedubackups.globaleducation.eqiad.wmflabs`.
+  </Step>
+</Steps>

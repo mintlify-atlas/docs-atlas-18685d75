@@ -1,0 +1,139 @@
+---
+title: "Training Modules"
+description: "How training libraries, modules, and slides are structured, loaded, and tracked on the Wiki Education Dashboard."
+---
+
+The training system provides self-paced learning content for students, instructors, and other participants. Content is organized in a three-level hierarchy: **libraries** → **modules** → **slides**.
+
+## Content hierarchy
+
+| Level | Model | Description |
+|---|---|---|
+| Library | `TrainingLibrary` | Top-level grouping (e.g. "Students", "Instructors"). Contains categories of modules. |
+| Module | `TrainingModule` | A single learning unit with an estimated time-to-complete. Can be a training, exercise, or discussion. |
+| Slide | `TrainingSlide` | An individual page within a module. Modules store an ordered `slide_slugs` array. |
+
+### Module kinds
+
+```ruby
+module TrainingModule::Kinds
+  TRAINING  = 0   # Standard informational content
+  EXERCISE  = 1   # Hands-on task (may require a sandbox edit)
+  DISCUSSION = 2  # Discussion prompt
+end
+```
+
+Exercise modules can require students to make an edit in a Wikipedia sandbox before completion is recorded. The sandbox location is defined in the module's `settings` hash.
+
+## Content sources
+
+The source of training content depends on the deployment mode set in `config/application.yml`.
+
+<Tabs>
+  <Tab title="Wiki Education mode">
+    Training content is loaded from **YAML files** bundled with the application.
+
+    ```
+    training_content/
+    ├── libraries/
+    │   └── *.yml      # One file per TrainingLibrary
+    ├── modules/
+    │   └── *.yml      # One file per TrainingModule
+    └── slides/
+        └── *.yml      # Grouped by module slug
+    ```
+
+    The `TrainingBase.base_path` method resolves the path to these files. Each YAML file is "inflated" into a database record by `TrainingLibrary.inflate`, `TrainingModule.inflate`, and `TrainingSlide` equivalents.
+
+    To reload all content in Wiki Education mode, visit:
+
+    ```
+    GET /reload_trainings?module=all
+    ```
+  </Tab>
+  <Tab title="Programs & Events mode">
+    Training content is loaded from **wiki pages on meta.wikimedia.org**. The index pages for libraries, modules, and slides are configured in `application.yml`:
+
+    ```yaml
+    training_libraries_wiki_page: 'Training libraries'
+    training_modules_wiki_page: 'Training modules'
+    # etc.
+    ```
+
+    Translations are fetched alongside content; each slide record stores a `translations` hash keyed by locale code.
+
+    Because loading translations is slow, reload individual modules rather than all at once during development:
+
+    ```
+    GET /reload_trainings?module=wikipedia-essentials
+    ```
+
+    <Warning>
+    Loading all modules in Programs & Events mode fetches a large amount of data from meta.wikimedia.org and can take several minutes.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Reloading training content
+
+To reload a specific module (updates library and module records first, then reloads the module's slides):
+
+```ruby
+TrainingModule.reload_module(slug: 'wikipedia-essentials')
+```
+
+This method:
+1. Calls `TrainingLibrary.load` to refresh library records.
+2. Calls `TrainingModule.load` to refresh module records.
+3. Finds the module by slug and reloads only its slides via `TrainingSlide.load(slug_list: ...)`.
+
+To reload everything programmatically:
+
+```ruby
+TrainingBase.load_all
+```
+
+## Completion tracking
+
+Progress is stored in the `training_modules_users` join table:
+
+| Field | Description |
+|---|---|
+| `user_id` | The user being tracked |
+| `training_module_id` | The module being tracked |
+| `last_slide_completed` | Slug of the most recently completed slide |
+| `completed_at` | Timestamp set when the entire module is finished |
+| `flags` | Serialized hash; stores per-course completion marks |
+
+Completion is determined by `TrainingProgressManager`. When a user finishes the last slide, `completed_at` is set. The `furthest_slide?` method prevents the tracker from moving backward if a user navigates to an earlier slide.
+
+For **exercise modules**, completion also requires the user to have content in their designated Wikipedia sandbox page. The dashboard checks `User:username/sandbox_location` via the MediaWiki API before marking the module complete.
+
+### Course-level training status
+
+A course exposes two aggregated training views:
+
+```ruby
+course.students_up_to_date_with_training   # Students who have completed all required modules
+course.students_with_overdue_training      # Students who have not
+```
+
+These delegate to `TrainedStudentsManager`, which compares each student's `TrainingModulesUsers` records against the modules assigned in the course timeline.
+
+## Integration with course timelines
+
+Training modules are assigned to courses through **timeline blocks**. A `Block` record (which belongs to a `Week`, which belongs to a `Course`) stores a `training_module_ids` array.
+
+```ruby
+course.training_module_ids
+# => [12, 15, 23]  # IDs of all modules assigned across all timeline blocks
+
+course.training_modules
+# => [<TrainingModule>, ...]
+```
+
+The course timeline is built by the **Assignment Wizard** (`wizard.yml` and `content.yml` configuration files drive the wizard UI). Instructors select topics and the wizard inserts the appropriate training blocks — including handout links and training module assignments — into the generated timeline.
+
+<Tip>
+To add a new handout option to the assignment wizard, add a shortlink on wikiedu.org, add a `logic` entry in the wizard YAML, register the logic key in the `HANDOUTS` hash in `lib/wizard_timeline_manager.rb`, and verify the output by generating a new timeline.
+</Tip>

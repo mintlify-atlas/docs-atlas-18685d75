@@ -1,0 +1,99 @@
+---
+title: "Contributing"
+description: "How to contribute code, report bugs, and get involved with the Wiki Education Dashboard project."
+---
+
+The Wiki Education Dashboard welcomes contributions. The main collaboration venue is Slack — contact Sage Ross (sage@wikiedu.org) to request an invite.
+
+## Quick start
+
+<Steps>
+  <Step title="Set up your development environment">
+    Follow the [local setup guide](/setup) to get the Dashboard running on your machine. Use the automated script if possible, and report any issues you encounter.
+  </Step>
+  <Step title="Pick an issue">
+    Browse [GitHub Issues](https://github.com/WikiEducationFoundation/WikiEduDashboard/issues) and leave a comment on the one you want to work on. Work on one issue at a time.
+  </Step>
+  <Step title="Create a branch and make your changes">
+    Create a git branch for your issue. Keep changes focused — only modify files related to the issue you're fixing.
+  </Step>
+  <Step title="Open a Pull Request">
+    Push your branch and open a PR. Mark it as a draft if it's not ready for review. Include before/after screenshots for UI changes.
+  </Step>
+</Steps>
+
+<Note>
+  If you're applying for Google Summer of Code or Outreachy, also read the [students and interns doc](https://github.com/WikiEducationFoundation/WikiEduDashboard/blob/master/docs/students_and_interns.md).
+</Note>
+
+## Issue labels
+
+Issues are categorized by severity and type:
+
+| Label | Meaning |
+|-------|---------|
+| `minor bug` | Usability problems that don't break core functionality |
+| `bug` | Bugs that should be fixed; significant but not urgent |
+| `high-importance bug` | Critical problems — fix as soon as possible |
+| `enhancement` | User-facing improvements |
+| `code quality` | Developer-facing improvements to the codebase |
+| `newcomer friendly` | Good first issues for new contributors |
+
+## Code style
+
+**Ruby**: The project follows the [Ruby Style Guide](https://github.com/bbatsov/ruby-style-guide). Rubocop is configured and editor integrations are recommended.
+
+**JavaScript/JSX**: All JS and JSX files must pass ESLint. Run `yarn lint` before submitting.
+
+**Templates**: Rails views use Haml. Stylesheets use Stylus.
+
+## Schema changes
+
+Keep migrations isolated — one column change per migration. Data migrations must be separate from schema migrations.
+
+If your changes modify model schema, regenerate the ERD diagram and model annotations:
+
+```bash
+rake erd orientation=vertical
+annotate
+```
+
+Ensure `schema.rb` only reflects your new migrations with no unrelated changes.
+
+## Pull request checklist
+
+**Before opening a PR:**
+- Branch from `master`, not directly from `main`
+- Rebase onto the latest master and resolve conflicts
+- Only changed files related to the issue — no schema noise, no lockfile changes unless intentional
+- Squash messy commit history into clean logical commits
+
+**PR format:**
+- Title matches the issue purpose
+- Reference the issue number
+- Add `[WIP]` in the title and mark as draft if not ready
+- Include before/after screenshots or videos for UI changes
+- Fill out all PR template sections
+
+**After opening a PR:**
+- Check the CI build (Travis CI, ~30 minutes)
+- Fix any failing tests before asking for review
+- If you get review feedback, mark the PR as draft until changes are made
+- Ping a reviewer if you haven't heard back in a day or two
+
+## Developer resources
+
+<CardGroup cols={2}>
+  <Card title="Frontend Architecture" icon="react" href="/frontend-architecture">
+    React, Redux, and Stylus overview
+  </Card>
+  <Card title="Testing Guide" icon="flask" href="/testing">
+    RSpec, Capybara, and Jest test suite
+  </Card>
+  <Card title="MediaWiki API Manual" icon="book" href="https://www.mediawiki.org/wiki/Manual:Contents">
+    Reference for Wikipedia API integration
+  </Card>
+  <Card title="Quarry" icon="database" href="http://quarry.wmflabs.org/">
+    Query the Labs replica database for testing SQL
+  </Card>
+</CardGroup>

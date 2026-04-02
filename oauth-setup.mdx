@@ -1,0 +1,151 @@
+---
+title: "OAuth Setup"
+description: "How to register a MediaWiki OAuth consumer for local development and production, and how to rotate production credentials."
+---
+
+The Dashboard uses [MediaWiki OAuth](https://www.mediawiki.org/wiki/Extension:OAuth) for all user authentication. A pre-configured read-only consumer is included in `config/application.example.yml` so you can log in immediately without registering your own — but it cannot make edits on Wikipedia. Register your own consumer when developing features that write to Wikipedia.
+
+<Warning>
+If you register your own OAuth consumer and set `disable_wiki_output: 'false'` in `application.yml`, the app will make **live, public edits** to Wikipedia under your account. You are responsible for the content of those edits.
+</Warning>
+
+## Prerequisites
+
+Before proposing a consumer you need a Wikimedia account with:
+
+- **A confirmed email address.** Go to Preferences → User profile on any Wikimedia site and set one.
+- **A confirmed account.** Accounts are confirmed automatically after a number of edits. If your account is new, you can [request manual confirmation](https://meta.wikimedia.org/wiki/Steward_requests/Permissions#Using_this_page).
+
+## Register a development consumer
+
+<Steps>
+  <Step title="Open the consumer registration form">
+    Go to [Special:OAuthConsumerRegistration/propose](https://meta.wikimedia.org/wiki/Special:OAuthConsumerRegistration/propose) on meta.wikimedia.org.
+  </Step>
+
+  <Step title="Fill in the form">
+    Use the following values:
+
+    | Field | Value |
+    |---|---|
+    | Application name | `<YOUR_NAME>_at_<YOUR_COMPANY>` |
+    | Application description | `<YOUR_NAME>'s local machine` |
+    | OAuth callback URL | `http://localhost:3000/users/auth/mediawiki/callback` |
+    | Contact email | Your Wikimedia account email address |
+    | Permissions | `Edit existing pages` and `Create, edit, and move pages` |
+    | Public RSA key | Leave blank to receive a shared secret |
+  </Step>
+
+  <Step title="Save your tokens">
+    After clicking **Propose consumer**, you will receive a **token** (consumer key) and a **secret**. Copy them into `config/application.yml`:
+
+    ```yaml
+    wikipedia_token: <your consumer token>
+    wikipedia_secret: <your consumer secret>
+    ```
+  </Step>
+
+  <Step title="Enable wiki output (optional)">
+    If you want the app to make edits, update `application.yml`:
+
+    ```yaml
+    disable_wiki_output: 'false'
+    edit_en.wikipedia.org: 'true'
+    ```
+
+    Leave `disable_wiki_output: 'true'` if you only need login functionality.
+  </Step>
+</Steps>
+
+<Note>
+A development consumer (used only by the account that registered it) works immediately — no approval needed. Anyone else who tries to authorise the app will receive an error until the consumer is approved.
+</Note>
+
+## Production and shared consumers
+
+For a production deployment or a shared testing environment, the consumer must be approved by Wikimedia Foundation staff before users other than the proposer can log in.
+
+Submit an approval request at [Steward requests/Miscellaneous](https://meta.wikimedia.org/wiki/Steward_requests/Miscellaneous).
+
+## Updating the production consumer
+
+When you need to rotate OAuth credentials on a live deployment, follow this process carefully to minimise disruption.
+
+<Steps>
+  <Step title="Register the new consumer">
+    Propose a new consumer as described above. Add its tokens to the production server's `application.yml`, **commented out**, so they are ready for the switchover:
+
+    ```yaml
+    # New consumer (not yet active)
+    # wikipedia_token: <new token>
+    # wikipedia_secret: <new secret>
+
+    # Current active consumer
+    wikipedia_token: <current token>
+    wikipedia_secret: <current secret>
+    ```
+  </Step>
+
+  <Step title="Schedule and notify users">
+    Ideally schedule the update during a low-traffic period. Add a sitenotice at least 30 minutes before the switchover:
+
+    ```yaml
+    sitenotice: "NOTICE: The system will log out all users shortly for maintenance."
+    ```
+  </Step>
+
+  <Step title="Snapshot the server">
+    Take a Linode (or equivalent) snapshot before making changes, in case a rollback is needed.
+  </Step>
+
+  <Step title="Swap the tokens">
+    Edit `application.yml` on the production server: comment out the old tokens, uncomment the new ones, and remove the sitenotice.
+  </Step>
+
+  <Step title="Clear user OAuth tokens">
+    In a Rails console on production, invalidate all stored user OAuth tokens:
+
+    ```ruby
+    User.update_all(wiki_token: nil, wiki_secret: nil)
+    ```
+
+    This forces every user to re-authorise with the new consumer on their next login.
+  </Step>
+
+  <Step title="Restart processes">
+    Restart the main application server and Sidekiq workers:
+
+    ```bash
+    touch tmp/restart.txt
+    cap production deploy:sidekiq:restart
+    ```
+  </Step>
+
+  <Step title="Record the new consumer ID (CID)">
+    Find the CID of the new consumer via `Special:Tags` on Wikipedia, or by logging in to the Dashboard with the new consumer and visiting `https://meta.wikimedia.org/wiki/Special:OAuthManageMyGrants` — the CID appears in the "Your edits by this application" link.
+
+    Add it to `oauth_ids` in `application.yml`:
+
+    ```yaml
+    oauth_ids: '252,212,<new_cid>'
+    ```
+  </Step>
+
+  <Step title="Restart again">
+    Restart the server and Sidekiq processes a second time to pick up the updated `oauth_ids`.
+  </Step>
+</Steps>
+
+## Granting admin permissions
+
+After logging in, you can promote your account to admin from the Rails console:
+
+```ruby
+User.find_by(wiki_id: 'YourUsername').update(permissions: User::Permissions::ADMIN)
+```
+
+Or via SQL:
+
+```sql
+UPDATE users SET permissions = 1 WHERE wiki_id = 'YourUsername';
+```

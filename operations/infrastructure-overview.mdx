@@ -1,0 +1,156 @@
+---
+title: "Infrastructure Overview"
+description: "Servers, Toolforge integrations, and third-party dependencies that power the Programs & Events Dashboard."
+---
+
+The **Programs & Events Dashboard** is hosted within the **Wikimedia Cloud VPS** project [globaleducation](https://openstack-browser.toolforge.org/project/globaleducation). All servers are virtual machines managed within Wikimedia Cloud, providing a flexible and centrally administrated infrastructure.
+
+The dashboard uses a **distributed server architecture** — each server is dedicated to a specific role. This isolation minimizes resource contention, improves reliability, and contains the blast radius of failures.
+
+---
+
+## Servers
+
+<CardGroup cols={2}>
+  <Card title="Web Server" icon="server">
+    **`peony-web.globaleducation.eqiad1.wikimedia.cloud`**
+
+    Hosts the main web application using **RVM**, **Phusion Passenger**, and **Apache**. Deployments are managed via **Capistrano**.
+
+    Also runs two Sidekiq processes:
+    - `sidekiq-default` — Schedules course updates (fast, runs every 5 min)
+    - `sidekiq-daily` — Executes long-running daily update tasks (runs at 11:30 UTC)
+  </Card>
+  <Card title="Database Server" icon="database">
+    **`peony-database.globaleducation.eqiad1.wikimedia.cloud`**
+
+    Stores all program, user, and revision data. Runs **MariaDB** and serves all data queries and updates for the application.
+  </Card>
+  <Card title="Redis Server" icon="bolt">
+    **`p-and-e-dashboard-redis.globaleducation.eqiad1.wikimedia.cloud`**
+
+    Stores all Sidekiq job details and acts as the shared task queue and cache across all Sidekiq processes.
+  </Card>
+  <Card title="Sidekiq Servers" icon="gears">
+    Three dedicated Sidekiq servers handle background processing, each hosting specific queues:
+
+    - **`peony-sidekiq`** — `long_update`, `constant_update`, `very_long_update`
+    - **`peony-sidekiq-medium`** — `medium_update`
+    - **`peony-sidekiq-3`** — `short_update`
+  </Card>
+</CardGroup>
+
+### Sidekiq Queue Architecture
+
+The dashboard's background jobs are distributed across queues by expected run duration. This prevents short, frequent jobs from being blocked by long-running ones.
+
+| Queue | Purpose | Concurrency |
+|---|---|---|
+| `default` | Schedule course updates | 2 |
+| `short_update` | Short-running course updates | 2 |
+| `medium_update` | Typical course updates | 2 |
+| `long_update` | Long-running course updates | 2 |
+| `daily_update` | Daily data refresh tasks | 2 |
+| `constant_update` | Revision metadata, alerts, notifications | 2 |
+| `very_long_update` | Very long-running course updates | 2 |
+
+<Note>
+  All Sidekiq processes share the same Redis instance for job coordination and the `uniquejobs` deduplication mechanism.
+</Note>
+
+---
+
+## Integrated Toolforge Tools
+
+These tools are hosted on Wikimedia Toolforge and are called by the Dashboard to access Wikimedia replica databases and supplementary data.
+
+<CardGroup cols={2}>
+  <Card title="wikiedudashboard Replica Tool" icon="magnifying-glass">
+    Provides PHP endpoints for querying **Wikimedia Replica databases**. Used to retrieve user contributions, verify article and revision existence, and check for deleted content.
+
+    Key endpoints:
+    - `/revisions.php` — Fetch revisions by user within a date range
+    - `/articles.php` — Verify article or revision existence
+
+    - [Live Tool](https://replica-revision-tools.wmcloud.org/)
+    - [Source Code](https://github.com/WikiEducationFoundation/WikiEduDashboardTools)
+    - [Tool Admin](https://toolsadmin.wikimedia.org/tools/id/wikiedudashboard)
+  </Card>
+  <Card title="Reference Counter API" icon="hashtag">
+    Returns the number of references in a specified revision ID from any supported wiki. Processes multiple revisions in batch via the `ReferenceCounterApi` class.
+
+    <Note>Wikidata is not supported — it uses a different reference model.</Note>
+
+    - [Live Tool](https://reference-counter.toolforge.org/)
+    - [Source Code](https://gitlab.wikimedia.org/toolforge-repos/reference-counter)
+    - [Phabricator](https://phabricator.wikimedia.org/T352177)
+  </Card>
+  <Card title="Suspected Plagiarism API" icon="shield-halved">
+    Detects suspected plagiarism in course-related content using **CopyPatrol**. The `PlagiabotImporter` class matches plagiarism cases with Dashboard revisions and generates alerts for content experts.
+
+    - [Live Tool](https://ruby-suspected-plagiarism.toolforge.org/)
+    - [Source Code](https://github.com/WikiEducationFoundation/ruby-suspected-plagiarism)
+    - [Tool Admin](https://toolsadmin.wikimedia.org/tools/id/ruby-suspected-plagiarism)
+  </Card>
+  <Card title="PagePile" icon="layer-group">
+    Manages static lists of Wiki pages. Users can input **PagePile IDs or URLs** during course creation to define a fixed set of articles. The `PagePileApi` class fetches and validates the page titles.
+
+    - [Live Tool](https://pagepile.toolforge.org/)
+    - [Source Code](https://bitbucket.org/magnusmanske/pagepile/src/master/)
+    - [Documentation](https://pagepile.toolforge.org/howto.html)
+  </Card>
+  <Card title="PetScan" icon="filter">
+    Provides dynamic article lists based on user-defined category/search queries. Users enter **PetScan IDs (PSIDs) or URLs** to scope course materials. The `PetScanApi` class handles retrieval and error handling for invalid PSIDs.
+
+    - [Live Tool](https://petscan.wmcloud.org/)
+    - [Source Code](https://github.com/magnusmanske/petscan_rs)
+    - [Documentation](https://meta.wikimedia.org/wiki/PetScan/en)
+  </Card>
+  <Card title="CopyPatrol" icon="copy">
+    A plagiarism detection tool that surfaces recent Wikipedia edits flagged as possible copyright violations. Used as the backend data source for the Suspected Plagiarism API integration.
+
+    - [Live Tool](https://copypatrol.wmcloud.org/en)
+    - [Source Code](https://github.com/wikimedia/CopyPatrol/)
+    - [Documentation](https://meta.wikimedia.org/wiki/CopyPatrol)
+  </Card>
+</CardGroup>
+
+---
+
+## Third-Party APIs and Dependencies
+
+<CardGroup cols={2}>
+  <Card title="WikiWho API" icon="pen-nib">
+    Parses historical revisions to track the **provenance of each word** in a Wikipedia article. Used by the `ArticleViewer` component to display detailed authorship information at the token level.
+
+    - [Documentation](https://wikiwho-api.wmcloud.org/gesis_home)
+    - [Source Code](https://github.com/wikimedia/wikiwho_api)
+  </Card>
+  <Card title="WhoColor API" icon="palette">
+    Extends WikiWho data with **color-coded authorship highlights**. Each token (word) receives a color class corresponding to its original author, rendered in the ArticleViewer via the `highlightAuthors` function.
+
+    - [Documentation](https://wikiwho-api.wmcloud.org/gesis_home)
+    - [Source Code](https://github.com/wikimedia/wikiwho_api)
+  </Card>
+  <Card title="WikidataDiffAnalyzer" icon="code-compare">
+    A Ruby gem that analyzes differences between Wikidata revisions — added/removed/changed claims, references, and labels. Results are serialized and stored in the revision summary field by `UpdateWikidataStatsTimeslice`.
+
+    - [Source Code & Docs](https://github.com/WikiEducationFoundation/wikidata-diff-analyzer)
+  </Card>
+  <Card title="Liftwing API" icon="chart-line">
+    Wikimedia's **machine learning** platform. The Dashboard uses it to fetch article quality and item quality scores by revision ID via the `LiftWingApi` service and `fetchPageRevisionScore` in the article finder.
+
+    - [Documentation](https://api.wikimedia.org/wiki/Lift_Wing_API)
+    - [Phabricator Project](https://phabricator.wikimedia.org/project/profile/5020/)
+  </Card>
+</CardGroup>
+
+---
+
+## More Resources
+
+- [Admin Guide](/operations/admin-guide) — Managing permissions, settings, and Sidekiq
+- [Monitoring & Observability](/operations/monitoring) — Grafana, SAL, Prometheus, and alerts
+- [Toolforge Documentation](https://wikitech.wikimedia.org/wiki/Help:Toolforge)
+- [Cloud VPS Documentation](https://wikitech.wikimedia.org/wiki/Help:Cloud_VPS)
+- [Cloud VPS Admin Documentation](https://wikitech.wikimedia.org/wiki/Portal:Cloud_VPS/Admin)

@@ -1,0 +1,134 @@
+---
+title: "Frontend Architecture"
+description: "Overview of the React, Redux, and Stylus frontend stack used in the Wiki Education Dashboard."
+---
+
+The Dashboard frontend is built with React.js and Redux, compiled via Webpack and Yarn. Server-rendered views use Haml templates. Stylesheets are written in Stylus with the Rupture responsive utility.
+
+## Stack overview
+
+<CardGroup cols={2}>
+  <Card title="React.js" icon="react" href="https://react.dev/">
+    Component-based UI library for all interactive views
+  </Card>
+  <Card title="Redux + Redux Toolkit" icon="layer-group" href="https://redux-toolkit.js.org/">
+    Single global store with actions, reducers, and Thunk middleware
+  </Card>
+  <Card title="React Router v4" icon="route" href="https://reactrouter.com/">
+    Client-side routing via `routes.jsx` entrypoint
+  </Card>
+  <Card title="Stylus + Rupture" icon="palette" href="https://stylus-lang.com/">
+    CSS preprocessor with responsive breakpoint utilities
+  </Card>
+</CardGroup>
+
+## Redux data flow
+
+Redux uses a **single store** built from many independent reducer functions. The flow is:
+
+1. A user action triggers a **Redux action** (plain object)
+2. Actions with async work (API calls) use **Thunk middleware**
+3. Reducers handle the action and return new state
+4. Container components subscribe via `connect()` with `mapStateToProps` and `mapDispatchToProps`
+
+```javascript
+// Example: dispatching an action from a component
+import { connect } from 'react-redux';
+import { updateCourse } from '../actions/course_actions';
+
+const mapDispatchToProps = dispatch => ({
+  updateCourse: course => dispatch(updateCourse(course))
+});
+
+export default connect(mapStateToProps, mapDispatchToProps)(CourseDetails);
+```
+
+<Tip>
+  Pass only the props a component needs via `mapStateToProps`. This minimizes re-renders — React components re-render whenever props change.
+</Tip>
+
+### Immer for immutable updates
+
+For reducers using traditional Redux (not Redux Toolkit slices), use Immer's `produce` function to simplify immutable state updates:
+
+```javascript
+import produce from 'immer';
+
+function courseReducer(state = initialState, action) {
+  return produce(state, draft => {
+    if (action.type === 'UPDATE_COURSE') {
+      draft.course.title = action.title;
+    }
+  });
+}
+```
+
+## Component structure
+
+Components live in `app/assets/javascripts/components/`. The entry point is `app.jsx`, which sets up the Redux store and renders the root component tree with React Router.
+
+### Higher-order components
+
+Higher-order components (HOCs) in `components/high_order/` wrap other components to add reusable behavior without mixins. For example, the `Conditional` HOC adds conditional rendering based on a boolean prop:
+
+```javascript
+// Before: Select renders unconditionally
+module.exports = Select;
+
+// After: Select only renders when `show` prop is true
+module.exports = Conditional(Select);
+```
+
+### Common components
+
+`components/common/` contains shared utilities used across the app: inputs, modals, the `ArticleViewer`, and others. These are not page-specific — they're reusable building blocks.
+
+## Routing
+
+`components/util/routes.jsx` defines all React Router route handlers and their component hierarchy. `app.jsx` uses this as the routing entrypoint.
+
+```javascript
+// app.jsx — Redux store + Router root
+import { createStore } from 'redux';
+import { Provider } from 'react-redux';
+import routes from './util/routes';
+```
+
+## API utilities
+
+`utils/api.js` contains AJAX helpers for requests to the Rails backend. New features should move API calls into Redux action files rather than calling `api.js` directly.
+
+## Stylesheets
+
+Stylesheets use **Stylus** syntax (`.styl` files) and the **Rupture** utility for responsive media queries. Add styles in `app/assets/stylesheets/`.
+
+```stylus
+// Rupture responsive breakpoint example
++below('md')
+  .course-nav
+    display none
+```
+
+## Asset building
+
+```bash
+# Development build with file watching
+yarn start
+
+# Production (minified) build
+yarn build
+
+# Hot Module Replacement (edit components without page reload)
+yarn hot
+```
+
+To enable HMR, set `hot_loading: true` in `config/application.yml`. Note: HMR serves files from memory, so run `yarn build` before running the test suite.
+
+## Adding dependencies
+
+Use Yarn to add or update packages — this keeps `yarn.lock` in sync:
+
+```bash
+yarn add <package-name>
+yarn add --dev <package-name>
+```

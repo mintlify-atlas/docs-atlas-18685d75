@@ -1,0 +1,97 @@
+{
+  "projectType": "saas",
+  "projectName": "Wiki Education Dashboard",
+  "projectDescription": "A full-stack web application that supports Wikipedia education assignments, edit-a-thons, and other wiki editing programs, providing course management, analytics, and training tools for instructors, students, and program organizers.",
+  "theme": "almond",
+  "primaryColor": "#949494",
+  "lightColor": "#2b2b2b",
+  "darkColor": "#bebebe",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "setup",
+              "docker"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "courses-and-campaigns",
+              "user-roles",
+              "training-modules",
+              "analytics-pipeline"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration",
+              "oauth-setup",
+              "internationalization",
+              "multiwiki"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing",
+              "testing",
+              "frontend-architecture",
+              "deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Operations",
+        "groups": [
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "operations/admin-guide",
+              "operations/infrastructure-overview",
+              "operations/monitoring"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "operations/troubleshooting",
+              "operations/production-troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Course and campaign management for Wikipedia education programs",
+    "Wikipedia OAuth authentication and user role management (instructor, student, admin)",
+    "Automated analytics pipeline tracking article edits, views, and quality scores",
+    "Training module system with content from wiki pages",
+    "Multi-wiki support across Wikimedia projects (Wikipedia, Wikidata, Wikimedia Commons)",
+    "Assignment wizard for structured course timeline creation",
+    "Plagiarism detection integration via CopyPatrol",
+    "Article quality scoring via Lift Wing API",
+    "Internationalization support via translatewiki.net",
+    "Survey system for gathering program feedback"
+  ],
+  "publicApiSurface": [
+    "GET /courses/:slug/course.json",
+    "GET /courses/:slug/articles.json",
+    "GET /courses/:slug/users.json",
+    "GET /courses/:slug/assignments.json",
+    "GET /campaigns/statistics.json",
+    "GET /campaigns/:slug.json",
+    "GET /users/:username",
+    "GET /training_modules",
+    "GET /analytics",
+    "POST /courses/:course_id/wizard/:wizard_id"
+  ]
+}

@@ -1,0 +1,62 @@
+---
+title: "Wiki Education Dashboard"
+description: "Manage Wikipedia education programs, track article contributions, and support instructors and students with a comprehensive course management platform."
+---
+
+The Wiki Education Dashboard is a web application that supports Wikipedia education assignments, edit-a-thons, and other wiki editing programs. It helps instructors create and manage courses, track student contributions across Wikipedia and other Wikimedia wikis, and provide training resources — all in one place.
+
+The Dashboard powers two production sites:
+- **[dashboard.wikiedu.org](https://dashboard.wikiedu.org)** — for Wiki Education programs focused on higher education in the United States and Canada
+- **[outreachdashboard.wmflabs.org](https://outreachdashboard.wmflabs.org)** — for the global Wikimedia community to organize edit-a-thons, education programs, and other events
+
+<CardGroup cols={2}>
+  <Card title="Set up your environment" icon="computer" href="/setup">
+    Get the Dashboard running locally with step-by-step setup instructions.
+  </Card>
+  <Card title="Courses & campaigns" icon="graduation-cap" href="/courses-and-campaigns">
+    Learn how to create and manage courses, programs, and campaigns.
+  </Card>
+  <Card title="User roles" icon="users" href="/user-roles">
+    Understand the instructor, student, and admin permission model.
+  </Card>
+  <Card title="Training modules" icon="book-open" href="/training-modules">
+    Configure and deliver training content to program participants.
+  </Card>
+  <Card title="Analytics pipeline" icon="chart-line" href="/analytics-pipeline">
+    See how the Dashboard tracks edits, article quality, and program impact.
+  </Card>
+  <Card title="Contributing" icon="code-pull-request" href="/contributing">
+    Find out how to contribute code, report bugs, and get involved.
+  </Card>
+</CardGroup>
+
+## What the Dashboard does
+
+<Steps>
+  <Step title="Instructors create a course">
+    An instructor or program organizer creates a course page, sets dates, and receives a shareable enroll link with a passcode.
+  </Step>
+  <Step title="Students join and get assigned articles">
+    Students join the course using the enroll link. The assignment wizard helps instructors build a structured timeline of weekly tasks and article assignments.
+  </Step>
+  <Step title="The Dashboard tracks contributions">
+    As students edit Wikipedia, the Dashboard automatically imports their revision data — article edits, bytes added, references added, and article quality scores.
+  </Step>
+  <Step title="Instructors review progress">
+    The course dashboard surfaces key metrics: articles edited, words added, article views, and training completion. Alerts notify instructors of issues like suspected plagiarism or unsubmitted drafts.
+  </Step>
+</Steps>
+
+## Key features
+
+- **Multi-wiki support** — Track edits across Wikipedia (all languages), Wikidata, Wikimedia Commons, and other Wikimedia projects
+- **Assignment wizard** — Build structured course timelines with weekly blocks and article assignments
+- **Training modules** — Deliver self-paced training content to students directly in the Dashboard
+- **Real-time analytics** — Article quality scores via Lift Wing API, pageview data, and revision-level statistics
+- **Plagiarism detection** — Automatic alerts for suspected copyright violations via CopyPatrol
+- **Campaigns** — Group related courses together for aggregate reporting and program-wide analytics
+- **Internationalization** — Interface available in many languages via translatewiki.net
+
+<Note>
+  The Dashboard uses Wikipedia accounts for authentication. Users log in with their Wikipedia credentials via OAuth — no separate account creation is needed.
+</Note>

@@ -1,0 +1,162 @@
+---
+title: "User Roles & Permissions"
+description: "Authentication, global permission levels, course-scoped roles, and special user positions on the Wiki Education Dashboard."
+---
+
+All dashboard accounts are Wikipedia accounts. Users authenticate exclusively through **Wikipedia OAuth** — there are no separate dashboard passwords. When a user logs in for the first time, the `UserImporter` creates a local `User` record linked to their Wikipedia `global_id` and `username`.
+
+<Note>
+The dashboard can make edits to Wikipedia on behalf of users only if a configured OAuth consumer with edit permissions is in place. The default development consumer in `application.example.yml` is read-only.
+</Note>
+
+## Authentication
+
+Authentication uses Devise with the `omniauth-mediawiki` strategy. The OAuth flow is initiated at `/users/auth/mediawiki` and handled by `OmniauthCallbacksController`. On success, `UserImporter.from_omniauth` finds or creates the user record.
+
+A user who is blocked from editing Wikipedia can still log in to the dashboard. Edits that fail due to a block are logged to Sentry.
+
+## Global permission levels
+
+Global permissions are stored as an integer in the `users.permissions` column.
+
+<Tabs>
+  <Tab title="Standard user (0)">
+    The default for all new accounts.
+
+    **Can:**
+    - View public courses and campaigns
+    - Log in with their Wikipedia account
+    - Complete the instructor onboarding flow to gain instructor-level access
+    - Enroll in courses as a student via an enroll link
+
+    **Cannot:**
+    - Create courses without completing onboarding
+    - Approve courses or manage campaigns
+    - Access admin pages
+  </Tab>
+  <Tab title="Admin (1)">
+    Granted via the Rails console or the `/settings` page (requires super admin).
+
+    ```ruby
+    User.find_by(username: 'YourUsername').update_attribute(:permissions, 1)
+    ```
+
+    **Can do everything a standard user can, plus:**
+    - Approve courses by adding them to campaigns
+    - Edit any course details
+    - Access the `/admin` dashboard
+    - View submitted-but-unapproved courses
+    - Add or remove students and instructors from any course
+    - Manage campaign membership
+  </Tab>
+  <Tab title="Instructor (2)">
+    Set during onboarding when a user selects the instructor option at `/onboarding`.
+
+    **Can:**
+    - Create new courses and programs
+    - Edit their own courses
+    - Add and remove students
+    - Manage their course timeline and assignments
+
+    **Cannot:**
+    - Approve courses (Wiki Education mode requires admin approval)
+    - Edit other instructors' courses
+    - Access admin or settings pages
+  </Tab>
+  <Tab title="Super admin (3)">
+    The highest privilege level.
+
+    ```ruby
+    User.find_by(username: 'YourUsername').update_attribute(:permissions, 3)
+    ```
+
+    **Can do everything an admin can, plus:**
+    - Access the `/settings` page
+    - Grant and revoke admin and super admin permissions for other users
+    - Assign and remove special user roles
+    - Manage disallowed users
+    - Update Salesforce credentials, site notices, and other global settings
+  </Tab>
+</Tabs>
+
+## Course-scoped roles
+
+In addition to the global permission level, a user can hold a role within a specific course. These are stored in the `courses_users` join table as an integer `role` value.
+
+| Role | Value | Description |
+|---|---|---|
+| Student | `0` | Enrolled participant whose edits are tracked |
+| Instructor | `1` | Course creator/manager; can edit course details and enrollment |
+| Campus volunteer | `2` | On-site volunteer supporting students |
+| Online volunteer | `3` | Remote volunteer supporting students |
+| Wiki Ed staff | `4` | Dashboard staff member supporting the course |
+
+A user cannot be both a student and an instructor in the same course. Admins implicitly have instructor-level edit rights on all courses (`admin?` checks override role checks in `can_edit?`).
+
+### Editing rights
+
+`user.can_edit?(course)` returns `true` if any of the following are true:
+- The user is an admin or super admin
+- The user has the `INSTRUCTOR_ROLE` or `WIKI_ED_STAFF_ROLE` in that course
+- The user is a campaign organizer for a campaign the course belongs to
+
+## Special user positions
+
+Special user slots are stored as named entries in the `special_users` settings key and managed from `/settings` (super admin required). These are **named positions**, not permission levels — the assigned user retains their normal permission level.
+
+| Position | Purpose |
+|---|---|
+| `classroom_program_manager` | Manages the Wiki Education classroom program |
+| `communications_manager` | Receives certain notification emails |
+| `outreach_manager` | Manages outreach activities |
+| `wikipedia_experts` | Array of Wikipedia expert accounts available to assist students |
+| `technical_help_staff` | Receives technical support notifications |
+| `survey_alerts_recipient` | Receives alerts related to survey activity |
+| `backup_account_creator` | Fallback account used for Wikipedia account creation requests |
+
+To assign a special user position, navigate to `/settings` and use the **Special Users** section. You must have super admin permissions.
+
+## Instructor onboarding
+
+New users who intend to run courses must complete the onboarding flow:
+
+<Steps>
+  <Step title="Visit the onboarding page">
+    Navigate to `/onboarding`. First-time instructors are directed here automatically after their first login if they haven't been onboarded yet (`user.onboarded` is `false`).
+  </Step>
+  <Step title="Select the instructor role">
+    Choose the instructor option. This sets `user.permissions` to `Permissions::INSTRUCTOR` (value `2`).
+  </Step>
+  <Step title="Provide contact details">
+    Supply a real name and email address. This information is used for course communication and support.
+  </Step>
+  <Step title="Create a course">
+    After onboarding, the **Create Course** button appears on the home page. The instructor can now set up their first course.
+  </Step>
+</Steps>
+
+<Tip>
+In a development environment you can skip onboarding by giving your account admin permissions directly from the Rails console, which grants full course-creation rights without going through the onboarding flow.
+</Tip>
+
+## Granting admin permissions
+
+From the Rails console:
+
+```ruby
+# Grant admin
+User.find_by(username: 'WikipediaUsername').update_attribute(:permissions, 1)
+
+# Grant super admin
+User.find_by(username: 'WikipediaUsername').update_attribute(:permissions, 3)
+```
+
+From the UI (requires super admin):
+
+1. Go to `/settings`.
+2. Open the **Admins** section.
+3. Enter a Wikipedia username and click **Make admin** or **Make super admin**.
+
+## Blocked users
+
+A user blocked on Wikipedia can still authenticate with the dashboard. The system may attempt wiki edits on their behalf; any edit that fails due to a Wikipedia block is logged to Sentry. There is no automatic suspension of dashboard access when a Wikipedia block is detected.

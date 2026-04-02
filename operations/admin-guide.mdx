@@ -1,0 +1,154 @@
+---
+title: "Admin Guide"
+description: "Comprehensive guide for Programs & Events Dashboard administrators covering permissions, settings, Sidekiq monitoring, and support."
+---
+
+The **Programs & Events Dashboard** ([outreachdashboard.wmflabs.org](https://outreachdashboard.wmflabs.org)) is a web application designed to support the global Wikimedia community in organizing programs, including edit-a-thons, education initiatives, and other events.
+
+This guide covers administrative tasks for operators of the dashboard, including managing admin permissions, configuring site settings, monitoring background jobs, and handling support requests.
+
+## Admin Permissions
+
+Admins have elevated privileges on the Dashboard, including the ability to manage other users, create campaigns, configure site notices, and access protected routes like `/sidekiq`.
+
+### Granting Admin Access
+
+Admin status is managed from the `/settings` page, which requires super admin access.
+
+<Steps>
+  <Step title="Navigate to Settings">
+    Go to `/settings` while logged in as an admin.
+  </Step>
+  <Step title="Find the Admin Management section">
+    Locate the **Admin Users** panel on the settings page.
+  </Step>
+  <Step title="Add the user">
+    Enter the Wikipedia username of the user you want to promote and submit the form. The user must have previously logged in to the Dashboard at least once before they can be granted admin status.
+  </Step>
+</Steps>
+
+<Note>
+  Admin access grants full access to all administrative routes including `/admin` and `/sidekiq`. Grant it only to trusted operators.
+</Note>
+
+### Revoking Admin Access
+
+Admin permissions can be revoked from the same **Admin Users** panel on `/settings` by removing the user from the admin list.
+
+---
+
+## The Settings Page (`/settings`)
+
+The `/settings` route is the primary interface for configuring the Dashboard. It is only accessible to **super admins** (`permissions = 3`).
+
+### Admin Management
+
+Add or remove admin users as described above. Admins can see the full list of current admins and promote or demote any user.
+
+### Special Users
+
+The settings page allows configuring **special users** — accounts that receive elevated treatment, such as being excluded from certain update checks or being used for automated Dashboard edits. These are typically bot accounts or staff accounts.
+
+### Course Creation Settings
+
+Admins can configure which users are allowed to create courses. Options typically include:
+
+- Allowing any logged-in user to create a course
+- Restricting course creation to admins only
+- Requiring approval for newly created courses
+
+### Site Notices
+
+The site notice feature allows admins to display a prominent banner message to all Dashboard users. This is useful for:
+
+- Announcing scheduled maintenance windows
+- Communicating known outages or disruptions
+- Sharing important updates with the community
+
+To set a notice, enter the message text in the **Site Notice** field on the settings page and save. Leave the field blank to remove the notice.
+
+### Campaigns
+
+Campaigns group related courses together and provide aggregated statistics. From the settings page, admins can:
+
+- Create new campaigns
+- Set a campaign as the default campaign (used for the main dashboard statistics)
+- Archive or delete campaigns
+
+<Tip>
+  The default campaign is updated automatically on January 1st and July 1st each year via a scheduled job (`DefaultCampaignUpdateWorker`) to align with the academic calendar.
+</Tip>
+
+---
+
+## The Admin Route (`/admin`)
+
+The `/admin` route provides a high-level administrative dashboard. It is restricted to admin users and exposes tools for managing courses, users, and system state that are not available through the standard interface.
+
+From `/admin` you can:
+
+- View and manage all courses regardless of campaign membership
+- Approve or reject courses pending review
+- View user accounts and their associated courses
+- Access links to monitoring tools and other administrative resources
+
+---
+
+## Sidekiq Monitoring (`/sidekiq`)
+
+The `/sidekiq` route provides the **Sidekiq Web UI**, which gives real-time visibility into the background job queue. This route is restricted to admin users.
+
+### What You Can See
+
+<CardGroup cols={2}>
+  <Card title="Queue Status" icon="list">
+    View the current depth and throughput of each queue: `default`, `short_update`, `medium_update`, `long_update`, `daily_update`, `constant_update`, and `very_long_update`.
+  </Card>
+  <Card title="Running Jobs" icon="play">
+    See which jobs are actively processing and on which Sidekiq worker, along with how long they have been running.
+  </Card>
+  <Card title="Scheduled Jobs" icon="clock">
+    Inspect cron-scheduled jobs managed by `sidekiq-cron`, including next run times. Key schedules include course updates every 5 minutes and the daily update at 11:30 UTC.
+  </Card>
+  <Card title="Retries & Dead Jobs" icon="arrow-rotate-left">
+    Review jobs that have failed and are scheduled for retry, or jobs that have exhausted all retries and moved to the Dead queue.
+  </Card>
+</CardGroup>
+
+### Queue Reference
+
+| Queue | Purpose | Host |
+|---|---|---|
+| `default` | Scheduling course updates (fast) | peony-web |
+| `daily_update` | Long-running daily update tasks | peony-web |
+| `short_update` | Short-running course updates | peony-sidekiq-3 |
+| `medium_update` | Typical course updates | peony-sidekiq-medium |
+| `long_update` | Long-running course updates | peony-sidekiq |
+| `constant_update` | Revision metadata, alerts | peony-sidekiq |
+| `very_long_update` | Very long course updates | peony-sidekiq |
+
+### Pausing and Managing Queues
+
+From the Sidekiq Web UI you can pause individual queues to stop new jobs from being dequeued without losing them. This is useful during maintenance or when a specific queue is causing problems. See the [Production Troubleshooting](/operations/production-troubleshooting) guide for detailed queue management procedures.
+
+---
+
+## Ticket System
+
+The Dashboard includes a built-in support ticket system used for handling user requests and issues. Admins receive email notifications for open support tickets on weekdays at 6:00 AM and 1:00 PM PT (configured via `TicketNotificationsWorker`).
+
+To access the ticket queue, navigate to the support section of the admin interface. Tickets can be assigned, replied to, and closed from within the Dashboard.
+
+<Note>
+  For infrastructure issues and outages, use [Phabricator](https://phabricator.wikimedia.org/project/manage/1052/) to track and communicate status publicly.
+</Note>
+
+---
+
+## More Resources
+
+- [Infrastructure Overview](/operations/infrastructure-overview) — Servers, tools, and third-party dependencies
+- [Monitoring & Observability](/operations/monitoring) — Grafana, SAL, Prometheus, and Sentry
+- [Production Troubleshooting](/operations/production-troubleshooting) — Fixing production incidents
+- [Phabricator Project](https://phabricator.wikimedia.org/project/manage/1052/) — Issue tracker for the P&E Dashboard
+- [Source Code (wmflabs branch)](https://github.com/WikiEducationFoundation/WikiEduDashboard/tree/wmflabs) — GitHub repository

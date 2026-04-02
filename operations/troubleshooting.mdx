@@ -1,0 +1,247 @@
+---
+title: "Troubleshooting"
+description: "Solutions to common issues encountered when setting up and running a local Wiki Education Dashboard development environment."
+---
+
+This guide covers common problems developers encounter when setting up and running a local development environment. For production incidents, see the [Production Troubleshooting](/operations/production-troubleshooting) guide.
+
+---
+
+## Ruby Installation
+
+<AccordionGroup>
+  <Accordion title="Installing Ruby on macOS">
+    You will likely need [Homebrew](https://brew.sh) before installing Ruby. Both `rvm` and `rbenv` work well on macOS.
+
+    If you encounter errors during Ruby installation, run:
+
+    ```bash
+    brew doctor
+    ```
+
+    Follow any advice it provides before retrying.
+  </Accordion>
+  <Accordion title="Installing Ruby on Windows">
+    It is highly recommended to use **WSL2** as your development environment. Verify you have WSL version 2 enabled, then use `rvm` or `rbenv` from within WSL.
+  </Accordion>
+  <Accordion title="Installing Ruby on Linux">
+    Use `rvm` or `rbenv`. If you encounter permission errors with rvm:
+
+    ```bash
+    rvm fix-permissions system
+    rvm fix-permissions user
+    ```
+
+    If you see `usermod: group 'rvm' does not exist`:
+
+    ```bash
+    sudo groupadd rvm
+    ```
+  </Accordion>
+  <Accordion title="Bundle install fails: can't find header files">
+    **Error:** `Gem::Ext::BuildError: ERROR: Failed to build gem native extension. *.rb can't find header files`
+
+    Install the missing Ruby development headers:
+
+    ```bash
+    sudo apt-get install ruby2.3-dev
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Database Issues
+
+<AccordionGroup>
+  <Accordion title="MySQL setup must come before installing Bundler">
+    Always complete your MySQL/MariaDB setup before running `bundle install`. If you installed Bundler first and hit database-related gem errors, set up MySQL and then re-run `bundle install`.
+  </Accordion>
+  <Accordion title="Can't connect to MySQL — permission denied or blank password (Debian)">
+    On Debian, the default MySQL root password is blank. If you can't start the MySQL command line with `sudo mysql`, set a password manually:
+
+    Edit `config/database.yml`:
+
+    ```yaml
+    password: "mypassword"
+    ```
+
+    Then run these commands in a terminal:
+
+    ```bash
+    mysql -u root -p
+    ```
+
+    Inside the MySQL shell:
+
+    ```sql
+    SET PASSWORD FOR 'root'@'localhost' = PASSWORD('mypassword');
+    CREATE DATABASE dashboard DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+    CREATE DATABASE dashboard_testing DEFAULT CHARACTER SET utf8 DEFAULT COLLATE utf8_general_ci;
+    exit
+    ```
+  </Accordion>
+  <Accordion title="MariaDB package has unmet dependencies (WSL)">
+    **Error:** `mariadb-server : Depends: mariadb-server-10.4 (>= ...) but it is not going to be installed`
+
+    Use `aptitude` instead of `apt-get`:
+
+    ```bash
+    sudo aptitude install mariadb-server
+    ```
+
+    When prompted for a solution, type `n` first. It will then suggest a corrected resolution — type `y` to accept it. Reopen your terminal and verify the server starts.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Redis Issues
+
+<AccordionGroup>
+  <Accordion title="Check if Redis is running">
+    To verify Redis is running as a daemon on Linux:
+
+    ```bash
+    ps aux | grep redis-server
+    ```
+
+    If the process is not listed, start Redis:
+
+    ```bash
+    redis-server --daemonize yes
+    ```
+
+    On systems with systemd:
+
+    ```bash
+    sudo systemctl start redis-server
+    sudo systemctl enable redis-server
+    ```
+  </Accordion>
+  <Accordion title="Redis connection refused errors in the app">
+    If the app logs show connection refused errors for Redis, confirm that Redis is running (see above) and that `config/application.yml` points to the correct Redis URL (usually `redis://localhost:6379/0` in development).
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## JavaScript Compilation Issues
+
+<AccordionGroup>
+  <Accordion title="EACCES: permission denied on .babel.json">
+    **Error:** `Error: EACCES: permission denied, open '/home/username/.babel.json'`
+
+    Babel cannot write to your home directory. Disable the Babel cache for this session:
+
+    ```bash
+    BABEL_DISABLE_CACHE=1 yarn start
+    ```
+  </Accordion>
+  <Accordion title="sh: node: not found (Ubuntu 16.04)">
+    **Error:** `sh: 1: node: not found`
+
+    Node.js is installed but not symlinked as `node`. Fix it:
+
+    ```bash
+    sudo ln -s /usr/bin/nodejs /usr/bin/node
+    ```
+
+    <Note>Use Node.js v14 or newer to avoid compatibility errors.</Note>
+  </Accordion>
+  <Accordion title="yarn command runs the wrong program (cmdtest conflict)">
+    **Error:** `ERROR: There are no scenarios; must have at least one`
+
+    Your system has `cmdtest` installed, which provides a conflicting `yarn` binary. Remove it and reinstall the correct yarn:
+
+    ```bash
+    sudo apt remove cmdtest
+    sudo npm -g install yarn
+    ```
+  </Accordion>
+  <Accordion title="npm unmet dependencies (WSL)">
+    Use `aptitude` for a better dependency resolver:
+
+    ```bash
+    sudo apt-get install aptitude
+    sudo aptitude install npm
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## OAuth Setup Issues
+
+<AccordionGroup>
+  <Accordion title="OAuth credentials not configured">
+    Local OAuth for Wikipedia login requires credentials registered on Meta-Wiki. Ensure `config/application.yml` contains valid values for:
+
+    - `wikipedia_token`
+    - `wikipedia_secret`
+
+    Obtain these by registering a new OAuth consumer at [Meta-Wiki Special:OAuthConsumerRegistration](https://meta.wikimedia.org/wiki/Special:OAuthConsumerRegistration). See [OAuth Setup](/oauth-setup) for step-by-step instructions.
+  </Accordion>
+  <Accordion title="OAuth callback URL mismatch">
+    Your registered OAuth consumer's callback URL must exactly match the URL your development server runs on (e.g., `http://localhost:3000`). If they differ, Wikipedia will reject the authentication attempt. Update the consumer registration on Meta-Wiki or adjust your local server port accordingly.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Test Suite Issues
+
+<AccordionGroup>
+  <Accordion title="Most integration tests fail with an exception (macOS / QT)">
+    This is usually caused by an improperly installed or linked version of QT, particularly on macOS. Refer to the [capybara-webkit QT installation guide](https://github.com/thoughtbot/capybara-webkit/wiki/Installing-Qt-and-compiling-capybara-webkit#video-playback-mp4-on-osx-requires-qt-5) for the correct setup steps.
+  </Accordion>
+  <Accordion title="Pry fails: 'Sorry you can't use Pry without Readline'">
+    Add `rb-readline` to the development group in your `Gemfile`:
+
+    ```ruby
+    group :development do
+      gem 'rb-readline'
+    end
+    ```
+
+    Then run `bundle install`.
+  </Accordion>
+  <Accordion title="RSpec tests run very slowly on WSL">
+    If your repository is cloned into the Windows file system (the path starts with `/mnt/`), RSpec will be extremely slow due to file system overhead.
+
+    Check your current path:
+
+    ```bash
+    pwd
+    ```
+
+    If it starts with `/mnt/`, move the repository to the Linux file system (e.g., `~/WikiEduDashboard`). See the [WSL filesystem documentation](https://learn.microsoft.com/en-us/windows/wsl/filesystems) for instructions.
+  </Accordion>
+  <Accordion title="NoSuchDriverError for ChromeDriver on ARM64 Ubuntu (UTM/Apple Silicon)">
+    Selenium Manager does not support ARM64 and cannot automatically locate ChromeDriver.
+
+    Install Chromium and ChromeDriver manually:
+
+    ```bash
+    sudo apt install chromium-browser chromium-chromedriver
+    ```
+
+    Then, in `spec/rails_helper.rb`, add the following line just above the `Capybara.register_driver :selenium do |app|` block:
+
+    ```ruby
+    Selenium::WebDriver::Chrome::Service.driver_path = '/usr/bin/chromedriver'
+    ```
+
+    <Warning>
+      Do **not** commit this change. It is environment-specific and will break CI or other developers' setups.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## More Resources
+
+- [Production Troubleshooting](/operations/production-troubleshooting) — Fixing issues in the live environment
+- [Infrastructure Overview](/operations/infrastructure-overview) — Architecture and dependencies
+- [WSL Filesystem Docs](https://learn.microsoft.com/en-us/windows/wsl/filesystems)
